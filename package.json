@@ -1,0 +1,39 @@
+{
+  "name": "scryfall-query-dsl",
+  "version": "0.1.0",
+  "description": "Browser-friendly Scryfall-style syntax parser and Elasticsearch DSL compiler.",
+  "type": "module",
+  "main": "./dist/scryfall-query-dsl.cjs",
+  "module": "./dist/scryfall-query-dsl.esm.js",
+  "exports": {
+    ".": {
+      "import": "./dist/scryfall-query-dsl.esm.js",
+      "require": "./dist/scryfall-query-dsl.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "examples"
+  ],
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "build:browser": "node ./scripts/build.mjs --format=browser",
+    "build:cjs": "node ./scripts/build.mjs --format=cjs",
+    "build:esm": "node ./scripts/build.mjs --format=esm",
+    "dev": "node ./scripts/build.mjs --watch --format=browser",
+    "test": "node --test ./test/**/*.test.js"
+  },
+  "keywords": [
+    "scryfall",
+    "elasticsearch",
+    "dsl",
+    "parser",
+    "browser"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.25.1"
+  }
+}

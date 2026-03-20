@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Scryfall Query DSL Example</title>
+  </head>
+  <body>
+    <script src="../dist/scryfall-query-dsl.js"></script>
+    <script>
+      const engine = window.ScryfallQueryDSL.createEngine();
+
+      engine.extend({
+        fields: {
+          inclusion_percent: {
+            aliases: ["ip"],
+            esPath: "edhrec.inclusion_percent",
+            type: "number",
+            parseValue: Number,
+            compile: window.ScryfallQueryDSL.compileNumericField
+          }
+        }
+      });
+
+      console.log(
+        engine.compile("(c:red or c:white) ip>1.4")
+      );
+    </script>
+  </body>
+</html>

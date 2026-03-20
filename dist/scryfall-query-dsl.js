@@ -1,0 +1,2045 @@
+/* scryfall-query-dsl v0.1.0+6f6845d | built 2026-03-20T10:08:52.219Z */
+var ScryfallQueryDSL = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // src/index.js
+  var index_exports = {};
+  __export(index_exports, {
+    BUILD_DATE: () => BUILD_DATE,
+    RELEASE: () => RELEASE,
+    VERSION: () => VERSION,
+    announceBrowserBuild: () => announceBrowserBuild,
+    compileBooleanField: () => compileBooleanField,
+    compileCollectorNumberField: () => compileCollectorNumberField,
+    compileColorField: () => compileColorField,
+    compileIsShortcutField: () => compileIsShortcutField,
+    compileKeywordField: () => compileKeywordField,
+    compileNotShortcutField: () => compileNotShortcutField,
+    compileNumericField: () => compileNumericField,
+    compileOrderedKeywordField: () => compileOrderedKeywordField,
+    compileSearchDirectionField: () => compileSearchDirectionField,
+    compileSearchLangField: () => compileSearchLangField,
+    compileSearchOrderField: () => compileSearchOrderField,
+    compileSearchPreferField: () => compileSearchPreferField,
+    compileSearchUniqueField: () => compileSearchUniqueField,
+    compileTextField: () => compileTextField,
+    createEngine: () => createEngine,
+    parseColorExpression: () => parseColorExpression
+  });
+
+  // src/compiler/helpers.js
+  var RANGE_OPERATOR_MAP = {
+    ">": "gt",
+    ">=": "gte",
+    "<": "lt",
+    "<=": "lte"
+  };
+  var ORDERED_COLORS = ["white", "blue", "black", "red", "green"];
+  var COLOR_SYMBOLS = {
+    white: "W",
+    blue: "U",
+    black: "B",
+    red: "R",
+    green: "G"
+  };
+  var COLOR_ALIASES = {
+    w: ["white"],
+    white: ["white"],
+    u: ["blue"],
+    blue: ["blue"],
+    b: ["black"],
+    black: ["black"],
+    r: ["red"],
+    red: ["red"],
+    g: ["green"],
+    green: ["green"],
+    c: [],
+    colorless: [],
+    m: "__multicolor__",
+    multicolor: "__multicolor__",
+    azorius: ["white", "blue"],
+    dimir: ["blue", "black"],
+    rakdos: ["black", "red"],
+    gruul: ["red", "green"],
+    selesnya: ["white", "green"],
+    orzhov: ["white", "black"],
+    izzet: ["blue", "red"],
+    golgari: ["black", "green"],
+    boros: ["white", "red"],
+    simic: ["blue", "green"],
+    bant: ["white", "blue", "green"],
+    esper: ["white", "blue", "black"],
+    grixis: ["blue", "black", "red"],
+    jund: ["black", "red", "green"],
+    naya: ["white", "red", "green"],
+    abzan: ["white", "black", "green"],
+    jeskai: ["white", "blue", "red"],
+    sultai: ["blue", "black", "green"],
+    mardu: ["white", "black", "red"],
+    temur: ["blue", "red", "green"],
+    dromoka: ["white", "green"],
+    ojutai: ["white", "blue"],
+    silumgar: ["blue", "black"],
+    kolaghan: ["black", "red"],
+    atarka: ["red", "green"],
+    broker: ["white", "blue", "green"],
+    brokers: ["white", "blue", "green"],
+    obscura: ["white", "blue", "black"],
+    maestros: ["blue", "black", "red"],
+    riveteers: ["black", "red", "green"],
+    cabaretti: ["white", "red", "green"],
+    lorehold: ["white", "red"],
+    prismari: ["blue", "red"],
+    quandrix: ["blue", "green"],
+    silverquill: ["white", "black"],
+    witherbloom: ["black", "green"],
+    chaos: ["blue", "black", "red", "green"],
+    aggression: ["white", "black", "red", "green"],
+    altruism: ["white", "blue", "red", "green"],
+    growth: ["white", "blue", "black", "red"],
+    artifice: ["white", "blue", "black", "green"]
+  };
+  function assertSupportedOperator(fieldName, supportedOperators, operator) {
+    if (!supportedOperators.includes(operator)) {
+      throw new Error(
+        `Field "${fieldName}" does not support operator "${operator}". Supported operators: ${supportedOperators.join(", ")}`
+      );
+    }
+  }
+  function compileKeywordDisjunction(esPath, values) {
+    if (!values.length) {
+      return { match_none: {} };
+    }
+    if (values.length === 1) {
+      return {
+        term: {
+          [esPath]: values[0]
+        }
+      };
+    }
+    return {
+      bool: {
+        should: values.map((value) => ({
+          term: {
+            [esPath]: value
+          }
+        })),
+        minimum_should_match: 1
+      }
+    };
+  }
+  function compilePathDisjunction(clauses) {
+    if (clauses.length === 1) {
+      return clauses[0];
+    }
+    return {
+      bool: {
+        should: clauses,
+        minimum_should_match: 1
+      }
+    };
+  }
+  function compileNumericField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    if (operator === ":" || operator === "=") {
+      return {
+        term: {
+          [definition.esPath]: value
+        }
+      };
+    }
+    return {
+      range: {
+        [definition.esPath]: {
+          [RANGE_OPERATOR_MAP[operator]]: value
+        }
+      }
+    };
+  }
+  function compileKeywordField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    const esPaths = Array.isArray(definition.esPaths) && definition.esPaths.length ? definition.esPaths : [definition.esPath];
+    const terms = esPaths.map((esPath) => ({
+      term: {
+        [esPath]: value
+      }
+    }));
+    return compilePathDisjunction(terms);
+  }
+  function compileTextField({ fieldName, definition, operator, value, node }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    const esPaths = Array.isArray(definition.esPaths) && definition.esPaths.length ? definition.esPaths : [definition.esPath];
+    if (fieldName === "name" && operator === ":" && typeof value === "string" && esPaths.length === 1) {
+      if (node?.quoted) {
+        return {
+          match_phrase: {
+            [definition.esPath]: value
+          }
+        };
+      }
+      if (node?.implicit && /\s/.test(value)) {
+        return {
+          match: {
+            [definition.esPath]: {
+              query: value,
+              operator: "and"
+            }
+          }
+        };
+      }
+    }
+    if (operator === "=") {
+      const terms = esPaths.map((esPath) => ({
+        term: {
+          [esPath]: value
+        }
+      }));
+      return compilePathDisjunction(terms);
+    }
+    const matches = esPaths.map((esPath) => ({
+      match: {
+        [esPath]: value
+      }
+    }));
+    return compilePathDisjunction(matches);
+  }
+  function compileBooleanField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    return {
+      term: {
+        [definition.esPath]: value
+      }
+    };
+  }
+  function compileSearchDirectiveField({ fieldName, definition, operator, value, directive }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    return {
+      control: {
+        directive,
+        value
+      }
+    };
+  }
+  function compileSearchUniqueField(args) {
+    return compileSearchDirectiveField({ ...args, directive: "unique" });
+  }
+  function compileSearchOrderField(args) {
+    return compileSearchDirectiveField({ ...args, directive: "order" });
+  }
+  function compileSearchPreferField(args) {
+    return compileSearchDirectiveField({ ...args, directive: "prefer" });
+  }
+  function compileSearchDirectionField(args) {
+    return compileSearchDirectiveField({ ...args, directive: "direction" });
+  }
+  function compileSearchLangField(args) {
+    return compileSearchDirectiveField({ ...args, directive: "lang" });
+  }
+  function normalizeShortcutCompiledClause(clause) {
+    if (!clause) {
+      throw new Error("Shortcut compiler produced an empty clause.");
+    }
+    if (Object.prototype.hasOwnProperty.call(clause, "__sqdsl_clause")) {
+      return clause.__sqdsl_clause ?? null;
+    }
+    if (clause.control) {
+      throw new Error("Shortcut expansion cannot emit search controls.");
+    }
+    return clause;
+  }
+  function negateShortcutClause(clause) {
+    return {
+      bool: {
+        must_not: [clause]
+      }
+    };
+  }
+  function compileShortcutAtomClause(atom, registry) {
+    const match = atom.match(/^(-)?([^:><=]+)(>=|<=|:|=|>|<)(.+)$/);
+    if (!match) {
+      throw new Error(`Invalid is:default atom "${atom}".`);
+    }
+    const [, unaryNegation, fieldName, operator, rawValue] = match;
+    const definition = registry.getField(fieldName);
+    const parsedValue = registry.parseValue(fieldName, rawValue);
+    const compiled = definition.compile({
+      fieldName,
+      definition,
+      operator,
+      value: parsedValue,
+      node: null,
+      registry
+    });
+    const clause = normalizeShortcutCompiledClause(compiled);
+    if (!clause) {
+      throw new Error(`is:default atom "${atom}" produced no query clause.`);
+    }
+    return unaryNegation ? negateShortcutClause(clause) : clause;
+  }
+  function compileIsDefaultShortcut({ definition, token, term, registry }) {
+    const atoms = definition.tokenExpansions?.[token];
+    if (!Array.isArray(atoms) || !atoms.length) {
+      return null;
+    }
+    const clauses = atoms.map((atom) => compileShortcutAtomClause(atom, registry));
+    return {
+      __sqdsl_clause: {
+        bool: {
+          must: clauses
+        }
+      },
+      __sqdsl_meta: {
+        type: "shortcut-term",
+        field: definition.name,
+        token,
+        term,
+        valid: true,
+        matchedFields: ["shortcut-expansion"],
+        expandedAtoms: atoms
+      }
+    };
+  }
+  function compileIsShortcutField({ definition, value, node, registry }) {
+    const token = String(value).toLowerCase();
+    const mappedFields = definition.tokenFieldMap?.[token] ?? [];
+    const term = `${definition.name}:${token}`;
+    const expansion = compileIsDefaultShortcut({
+      definition,
+      token,
+      term,
+      registry
+    });
+    if (expansion) {
+      return expansion;
+    }
+    if (!mappedFields.length) {
+      return {
+        __sqdsl_clause: null,
+        __sqdsl_meta: {
+          type: "shortcut-term",
+          field: definition.name,
+          token,
+          term,
+          valid: false
+        }
+      };
+    }
+    const shouldClauses = mappedFields.map((fieldPath) => ({
+      term: {
+        [fieldPath]: token
+      }
+    }));
+    const clause = shouldClauses.length === 1 ? shouldClauses[0] : {
+      bool: {
+        should: shouldClauses,
+        minimum_should_match: 1
+      }
+    };
+    return {
+      __sqdsl_clause: clause,
+      __sqdsl_meta: {
+        type: "shortcut-term",
+        field: definition.name,
+        token,
+        term,
+        valid: true,
+        matchedFields: mappedFields
+      }
+    };
+  }
+  function compileNotShortcutField({ definition, value, node }) {
+    const token = String(value).toLowerCase();
+    const mappedFields = definition.tokenFieldMap?.[token] ?? [];
+    const term = `${definition.name}:${token}`;
+    if (!mappedFields.length) {
+      return {
+        __sqdsl_clause: null,
+        __sqdsl_meta: {
+          type: "shortcut-term",
+          field: definition.name,
+          token,
+          term,
+          valid: false
+        }
+      };
+    }
+    return {
+      __sqdsl_clause: {
+        bool: {
+          must_not: mappedFields.map((fieldPath) => ({
+            term: {
+              [fieldPath]: token
+            }
+          }))
+        }
+      },
+      __sqdsl_meta: {
+        type: "shortcut-term",
+        field: definition.name,
+        token,
+        term,
+        valid: true,
+        matchedFields: mappedFields
+      }
+    };
+  }
+  function createFieldSort(field, direction, options = {}) {
+    return {
+      [field]: {
+        order: direction,
+        ...options
+      }
+    };
+  }
+  function createScriptSort(source, params, direction = "asc") {
+    return {
+      _script: {
+        type: "number",
+        order: direction,
+        script: {
+          lang: "painless",
+          source,
+          params
+        }
+      }
+    };
+  }
+  function createDefaultPrintingSorts() {
+    return [
+      createFieldSort("full_art", "asc", { unmapped_type: "boolean" }),
+      createFieldSort("promo_types", "asc", { unmapped_type: "keyword", missing: "_first" }),
+      createFieldSort("frame_effects", "asc", { unmapped_type: "keyword", missing: "_first" }),
+      createFieldSort("set_type", "asc", { unmapped_type: "keyword" }),
+      createFieldSort("frame", "asc", { unmapped_type: "keyword" }),
+      createFieldSort("finishes", "desc", { unmapped_type: "keyword" }),
+      createFieldSort("border_color", "desc", { unmapped_type: "keyword" }),
+      createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
+      createFieldSort("collector_number", "desc", { unmapped_type: "keyword" })
+    ];
+  }
+  function compileOrderedKeywordField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    if (operator === ":" || operator === "=") {
+      return {
+        term: {
+          [definition.esPath]: value
+        }
+      };
+    }
+    const orderedValues = definition.order ?? [];
+    const valueIndex = orderedValues.indexOf(value);
+    if (valueIndex < 0) {
+      throw new Error(`Unknown ordered value "${value}" for field "${fieldName}".`);
+    }
+    if (operator === ">") {
+      return compileKeywordDisjunction(definition.esPath, orderedValues.slice(valueIndex + 1));
+    }
+    if (operator === ">=") {
+      return compileKeywordDisjunction(definition.esPath, orderedValues.slice(valueIndex));
+    }
+    if (operator === "<") {
+      return compileKeywordDisjunction(definition.esPath, orderedValues.slice(0, valueIndex));
+    }
+    if (operator === "<=") {
+      return compileKeywordDisjunction(definition.esPath, orderedValues.slice(0, valueIndex + 1));
+    }
+    throw new Error(`Unsupported operator "${operator}" for field "${fieldName}".`);
+  }
+  function compileCollectorNumberField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    if (operator === ":" || operator === "=") {
+      return {
+        term: {
+          [definition.esPath]: value
+        }
+      };
+    }
+    const numericValue = Number(value);
+    if (Number.isNaN(numericValue)) {
+      throw new Error(`Collector number comparisons require a numeric value. Received "${value}".`);
+    }
+    return {
+      script: {
+        script: {
+          lang: "painless",
+          source: [
+            `if (doc['${definition.esPath}'].size() == 0) return false;`,
+            `String collectorNumber = doc['${definition.esPath}'].value;`,
+            "if (!/^[0-9]+$/.matcher(collectorNumber).matches()) return false;",
+            `return Integer.parseInt(collectorNumber) ${operator} params.value;`
+          ].join(" "),
+          params: {
+            value: numericValue
+          }
+        }
+      }
+    };
+  }
+  function uniqueColors(colors) {
+    return [...new Set(colors)].sort(
+      (left, right) => ORDERED_COLORS.indexOf(left) - ORDERED_COLORS.indexOf(right)
+    );
+  }
+  function enumerateColorSets() {
+    const sets = [];
+    const total = 2 ** ORDERED_COLORS.length;
+    for (let mask = 0; mask < total; mask += 1) {
+      const colors = [];
+      for (let index = 0; index < ORDERED_COLORS.length; index += 1) {
+        if (mask & 1 << index) {
+          colors.push(ORDERED_COLORS[index]);
+        }
+      }
+      sets.push(colors);
+    }
+    return sets;
+  }
+  function compileExactColorSet(esPath, colors) {
+    const requiredColors = uniqueColors(colors);
+    const excludedColors = ORDERED_COLORS.filter((color) => !requiredColors.includes(color));
+    const bool = {};
+    if (requiredColors.length) {
+      bool.must = requiredColors.map((color) => ({
+        term: {
+          [esPath]: COLOR_SYMBOLS[color]
+        }
+      }));
+    }
+    if (excludedColors.length) {
+      bool.must_not = excludedColors.map((color) => ({
+        term: {
+          [esPath]: COLOR_SYMBOLS[color]
+        }
+      }));
+    }
+    return { bool };
+  }
+  function compileColorSetDisjunction(esPath, colorSets) {
+    if (!colorSets.length) {
+      return { match_none: {} };
+    }
+    if (colorSets.length === 1) {
+      return compileExactColorSet(esPath, colorSets[0]);
+    }
+    return {
+      bool: {
+        should: colorSets.map((colors) => compileExactColorSet(esPath, colors)),
+        minimum_should_match: 1
+      }
+    };
+  }
+  function compileColorlessField(esPath) {
+    return {
+      bool: {
+        must_not: [
+          {
+            exists: {
+              field: esPath
+            }
+          }
+        ]
+      }
+    };
+  }
+  function resolveColorPaths(definition) {
+    if (Array.isArray(definition.esPaths) && definition.esPaths.length) {
+      return definition.esPaths;
+    }
+    return [definition.esPath];
+  }
+  function compileColorAcrossPaths(definition, builder) {
+    const paths = resolveColorPaths(definition);
+    const clauses = paths.map((path) => builder(path));
+    if (clauses.length === 1) {
+      return clauses[0];
+    }
+    return {
+      bool: {
+        should: clauses,
+        minimum_should_match: 1
+      }
+    };
+  }
+  function parseColorValueToken(rawValue) {
+    const normalized = String(rawValue).trim().toLowerCase();
+    const aliasHit = COLOR_ALIASES[normalized];
+    if (aliasHit) {
+      if (aliasHit === "__multicolor__") {
+        return { kind: "multicolor" };
+      }
+      return {
+        kind: "set",
+        colors: uniqueColors(aliasHit)
+      };
+    }
+    if (/^[wubrg]+$/.test(normalized)) {
+      return {
+        kind: "set",
+        colors: uniqueColors(
+          normalized.split("").map((letter) => COLOR_ALIASES[letter][0])
+        )
+      };
+    }
+    throw new Error(`Unknown color expression "${rawValue}".`);
+  }
+  function parseColorExpression(rawValue) {
+    return parseColorValueToken(rawValue);
+  }
+  function compileColorField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    if (value.kind === "multicolor") {
+      if (operator !== ":" && operator !== "=") {
+        throw new Error(`Field "${fieldName}" does not support operator "${operator}" for multicolor.`);
+      }
+      return compileColorAcrossPaths(
+        definition,
+        (esPath) => compileColorSetDisjunction(
+          esPath,
+          enumerateColorSets().filter((colors) => colors.length >= 2)
+        )
+      );
+    }
+    const targetColors = value.colors;
+    const allSets = enumerateColorSets();
+    if (!targetColors.length) {
+      if (operator === ":" || operator === "=" || operator === "<=") {
+        const paths = resolveColorPaths(definition);
+        if (paths.length === 1) {
+          return compileColorlessField(paths[0]);
+        }
+        return {
+          bool: {
+            must: paths.map((esPath) => compileColorlessField(esPath))
+          }
+        };
+      }
+      if (operator === "<") {
+        return { match_none: {} };
+      }
+    }
+    if (operator === ":" || operator === "=") {
+      return compileColorAcrossPaths(definition, (esPath) => compileExactColorSet(esPath, targetColors));
+    }
+    if (operator === ">=") {
+      return compileColorAcrossPaths(definition, (esPath) => ({
+        bool: {
+          must: targetColors.map((color) => ({
+            term: {
+              [esPath]: COLOR_SYMBOLS[color]
+            }
+          }))
+        }
+      }));
+    }
+    if (operator === ">") {
+      const extraColors = ORDERED_COLORS.filter((color) => !targetColors.includes(color));
+      if (!extraColors.length) {
+        return { match_none: {} };
+      }
+      return compileColorAcrossPaths(definition, (esPath) => ({
+        bool: {
+          must: targetColors.map((color) => ({
+            term: {
+              [esPath]: COLOR_SYMBOLS[color]
+            }
+          })),
+          should: extraColors.map((color) => ({
+            term: {
+              [esPath]: COLOR_SYMBOLS[color]
+            }
+          })),
+          minimum_should_match: 1
+        }
+      }));
+    }
+    if (operator === "<=") {
+      return compileColorAcrossPaths(
+        definition,
+        (esPath) => compileColorSetDisjunction(
+          esPath,
+          allSets.filter((colors) => colors.every((color) => targetColors.includes(color)))
+        )
+      );
+    }
+    if (operator === "<") {
+      return compileColorAcrossPaths(
+        definition,
+        (esPath) => compileColorSetDisjunction(
+          esPath,
+          allSets.filter(
+            (colors) => colors.length < targetColors.length && colors.every((color) => targetColors.includes(color))
+          )
+        )
+      );
+    }
+    throw new Error(`Unsupported operator "${operator}" for field "${fieldName}".`);
+  }
+
+  // src/compiler/index.js
+  var RARITY_RANKS = {
+    common: 0,
+    uncommon: 1,
+    rare: 2,
+    mythic: 3,
+    special: 4,
+    bonus: 5
+  };
+  function normalizeCompiledClause(clause) {
+    if (!clause) {
+      throw new Error("Compiler produced an empty Elasticsearch clause.");
+    }
+    if (Object.prototype.hasOwnProperty.call(clause, "__sqdsl_clause")) {
+      return {
+        clause: clause.__sqdsl_clause ?? null,
+        controls: [],
+        meta: clause.__sqdsl_meta ? [clause.__sqdsl_meta] : []
+      };
+    }
+    if (clause.control) {
+      return {
+        clause: null,
+        controls: [clause.control],
+        meta: []
+      };
+    }
+    return {
+      clause,
+      controls: [],
+      meta: []
+    };
+  }
+  function negateClause(clause) {
+    return {
+      bool: {
+        must_not: [clause]
+      }
+    };
+  }
+  function boolKeyForOperator(operator) {
+    if (operator === "and") {
+      return "must";
+    }
+    if (operator === "or") {
+      return "should";
+    }
+    throw new Error(`Unsupported boolean operator "${operator}".`);
+  }
+  function mergeBooleanResults(operator, results) {
+    const clauses = [];
+    const controls = [];
+    const meta = [];
+    for (const result of results) {
+      controls.push(...result.controls);
+      meta.push(...result.meta ?? []);
+      if (result.clause) {
+        clauses.push(result.clause);
+      }
+    }
+    if (!clauses.length) {
+      return { clause: null, controls, meta };
+    }
+    if (clauses.length === 1) {
+      return { clause: clauses[0], controls, meta };
+    }
+    const boolKey = boolKeyForOperator(operator);
+    const bool = {
+      [boolKey]: clauses
+    };
+    if (boolKey === "should") {
+      bool.minimum_should_match = 1;
+    }
+    return {
+      clause: { bool },
+      controls,
+      meta
+    };
+  }
+  function uniqueStrings(values) {
+    const seen = /* @__PURE__ */ new Set();
+    const result = [];
+    for (const value of values) {
+      if (seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      result.push(value);
+    }
+    return result;
+  }
+  function buildOrderSorts(order, direction) {
+    const normalizedDirection = direction ?? "asc";
+    if (order === "cmc") {
+      return [createFieldSort("cmc", normalizedDirection, { unmapped_type: "double" })];
+    }
+    if (order === "power") {
+      return [createFieldSort("power", normalizedDirection, { unmapped_type: "keyword" })];
+    }
+    if (order === "toughness") {
+      return [createFieldSort("toughness", normalizedDirection, { unmapped_type: "keyword" })];
+    }
+    if (order === "set") {
+      return [createFieldSort("set", normalizedDirection, { unmapped_type: "keyword" })];
+    }
+    if (order === "name") {
+      return [createFieldSort("name.keyword", normalizedDirection, { unmapped_type: "keyword" })];
+    }
+    if (order === "usd" || order === "eur" || order === "tix") {
+      return [createFieldSort(`prices.${order}`, normalizedDirection, { unmapped_type: "double" })];
+    }
+    if (order === "edhrec") {
+      return [createFieldSort("edhrec_rank", normalizedDirection, { unmapped_type: "long" })];
+    }
+    if (order === "released") {
+      return [createFieldSort("released_at", normalizedDirection, { unmapped_type: "keyword" })];
+    }
+    if (order === "rarity") {
+      return [
+        createScriptSort(
+          `
+          def rarity = doc.containsKey(params.field) && !doc[params.field].empty ? doc[params.field].value : null;
+          if (rarity == null) {
+            return params.fallback;
+          }
+          return params.ranks.containsKey(rarity) ? params.ranks.get(rarity) : params.fallback;
+        `,
+          {
+            field: "rarity",
+            fallback: 999,
+            ranks: RARITY_RANKS
+          },
+          normalizedDirection
+        )
+      ];
+    }
+    if (order === "color") {
+      return [
+        createScriptSort(
+          `
+          return doc.containsKey(params.field) && !doc[params.field].empty ? doc[params.field].size() : 0;
+        `,
+          {
+            field: "colors"
+          },
+          normalizedDirection
+        )
+      ];
+    }
+    throw new Error(`Unknown order expression "${order}".`);
+  }
+  function buildPreferSorts(prefer) {
+    if (prefer === "default") {
+      return createDefaultPrintingSorts();
+    }
+    if (prefer === "oldest") {
+      return [
+        createFieldSort("released_at", "asc", { unmapped_type: "keyword" }),
+        createFieldSort("collector_number", "asc", { unmapped_type: "keyword" })
+      ];
+    }
+    if (prefer === "newest") {
+      return [
+        createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
+        createFieldSort("collector_number", "desc", { unmapped_type: "keyword" })
+      ];
+    }
+    if (prefer === "usd-low") {
+      return [createFieldSort("prices.usd", "asc", { unmapped_type: "double" })];
+    }
+    if (prefer === "usd-high") {
+      return [createFieldSort("prices.usd", "desc", { unmapped_type: "double" })];
+    }
+    if (prefer === "promo") {
+      return [
+        createFieldSort("promo", "desc", { unmapped_type: "boolean" }),
+        createFieldSort("released_at", "desc", { unmapped_type: "keyword" })
+      ];
+    }
+    if (prefer === "ub") {
+      return [
+        createFieldSort("universes_beyond", "desc", { unmapped_type: "boolean" }),
+        createFieldSort("released_at", "desc", { unmapped_type: "keyword" })
+      ];
+    }
+    if (prefer === "notub") {
+      return [
+        createFieldSort("universes_beyond", "asc", { unmapped_type: "boolean" }),
+        createFieldSort("released_at", "desc", { unmapped_type: "keyword" })
+      ];
+    }
+    if (prefer === "atypical") {
+      return [
+        createScriptSort(
+          `
+          def score = 0;
+          if (doc.containsKey('promo') && !doc['promo'].empty && doc['promo'].value) {
+            score += 8;
+          }
+          if (doc.containsKey('frame_effect') && !doc['frame_effect'].empty) {
+            score += 4;
+          }
+          if (doc.containsKey('full_art') && !doc['full_art'].empty && doc['full_art'].value) {
+            score += 2;
+          }
+          if (doc.containsKey('oversized') && !doc['oversized'].empty && doc['oversized'].value) {
+            score += 1;
+          }
+          return score;
+        `,
+          {},
+          "desc"
+        )
+      ];
+    }
+    throw new Error(`Unknown prefer expression "${prefer}".`);
+  }
+  function buildLangSorts(lang) {
+    return [
+      createScriptSort(
+        `
+        if (!doc.containsKey(params.field) || doc[params.field].empty) {
+          return 1;
+        }
+        return doc[params.field].value == params.lang ? 0 : 1;
+      `,
+        {
+          field: "lang",
+          lang
+        },
+        "asc"
+      )
+    ];
+  }
+  function applySearchControls(controls) {
+    const state = {
+      unique: null,
+      order: null,
+      prefer: null,
+      direction: "asc",
+      lang: null
+    };
+    for (const control of controls) {
+      if (control.directive === "unique") {
+        state.unique = control.value;
+      } else if (control.directive === "order") {
+        state.order = control.value;
+      } else if (control.directive === "prefer") {
+        state.prefer = control.value;
+      } else if (control.directive === "direction") {
+        state.direction = control.value;
+      } else if (control.directive === "lang") {
+        state.lang = control.value;
+      }
+    }
+    const request = {};
+    if (state.unique === "cards") {
+      request.collapse = {
+        field: "oracle_id"
+      };
+    } else if (state.unique === "art") {
+      request.collapse = {
+        field: "illustration_id"
+      };
+    }
+    const sort = [];
+    if (state.lang) {
+      sort.push(...buildLangSorts(state.lang));
+    }
+    if (state.order) {
+      sort.push(...buildOrderSorts(state.order, state.direction));
+    } else if (state.unique === "cards") {
+      sort.push(...buildOrderSorts("name", state.direction));
+    }
+    if (state.prefer) {
+      sort.push(...buildPreferSorts(state.prefer));
+    }
+    if (sort.length) {
+      request.sort = sort;
+    }
+    return request;
+  }
+  function createCompiler({ registry }) {
+    function compileTerm(node) {
+      const fieldDefinition = registry.getField(node.field);
+      const value = registry.parseValue(node.field, node.value);
+      const compiled = normalizeCompiledClause(
+        fieldDefinition.compile({
+          fieldName: node.field,
+          definition: fieldDefinition,
+          operator: node.operator,
+          value,
+          node,
+          registry
+        })
+      );
+      if (compiled.controls.length && node.negated) {
+        throw new Error(`Search directive "${node.field}" cannot be negated.`);
+      }
+      return {
+        clause: node.negated && compiled.clause ? negateClause(compiled.clause) : compiled.clause,
+        controls: compiled.controls,
+        meta: compiled.meta
+      };
+    }
+    function compileNode(node) {
+      if (!node || typeof node !== "object") {
+        throw new Error("Cannot compile an invalid AST node.");
+      }
+      if (node.type === "term") {
+        return compileTerm(node);
+      }
+      if (node.type === "group") {
+        const compiled = compileNode(node.clause);
+        if (node.negated && compiled.clause) {
+          return {
+            clause: negateClause(compiled.clause),
+            controls: compiled.controls,
+            meta: compiled.meta
+          };
+        }
+        return compiled;
+      }
+      if (node.type === "boolean") {
+        const results = node.clauses.map(compileNode);
+        return mergeBooleanResults(node.operator, results);
+      }
+      throw new Error(`Unsupported AST node type "${node.type}".`);
+    }
+    return {
+      compile(ast) {
+        const compiled = compileNode(ast);
+        const query = compiled.clause ?? { match_all: {} };
+        const controls = applySearchControls(compiled.controls);
+        const hasControls = Object.keys(controls).length > 0;
+        if (!hasControls) {
+          return query;
+        }
+        return {
+          query,
+          ...controls
+        };
+      },
+      compileWithMeta(ast) {
+        const compiled = compileNode(ast);
+        const query = compiled.clause ?? { match_all: {} };
+        const controls = applySearchControls(compiled.controls);
+        const hasControls = Object.keys(controls).length > 0;
+        const dsl = hasControls ? {
+          query,
+          ...controls
+        } : query;
+        const shortcutTerms = (compiled.meta ?? []).filter((entry) => entry?.type === "shortcut-term");
+        const validTerms = uniqueStrings(shortcutTerms.filter((entry) => entry.valid).map((entry) => entry.term));
+        const invalidTerms = uniqueStrings(shortcutTerms.filter((entry) => !entry.valid).map((entry) => entry.term));
+        const warnings = shortcutTerms.filter((entry) => !entry.valid).map((entry) => ({
+          code: "UNKNOWN_IS_NOT_TOKEN",
+          field: entry.field,
+          token: entry.token,
+          term: entry.term
+        }));
+        return {
+          dsl,
+          meta: {
+            terms: {
+              valid: validTerms,
+              invalid: invalidTerms
+            },
+            warnings
+          }
+        };
+      }
+    };
+  }
+
+  // src/ast/index.js
+  function createTermNode({ field, operator, value, negated = false, ...meta }) {
+    return {
+      type: "term",
+      field,
+      operator,
+      value,
+      negated,
+      ...meta
+    };
+  }
+  function createBooleanNode(operator, clauses) {
+    return {
+      type: "boolean",
+      operator,
+      clauses
+    };
+  }
+  function createGroupNode(clause, negated = false) {
+    return {
+      type: "group",
+      clause,
+      negated
+    };
+  }
+
+  // src/parser/index.js
+  var OPERATOR_PATTERN = /^(>=|<=|:|=|>|<)$/;
+  function isWhitespace(character) {
+    return /\s/.test(character);
+  }
+  function isBoundaryCharacter(character) {
+    return character === void 0 || isWhitespace(character) || character === "(" || character === ")";
+  }
+  function tokenize(query) {
+    const tokens = [];
+    let index = 0;
+    while (index < query.length) {
+      const character = query[index];
+      if (isWhitespace(character)) {
+        index += 1;
+        continue;
+      }
+      if (character === "(" || character === ")") {
+        tokens.push({ type: character });
+        index += 1;
+        continue;
+      }
+      if (character === "-") {
+        tokens.push({ type: "NOT" });
+        index += 1;
+        continue;
+      }
+      let end = index;
+      let inQuotes = false;
+      let escaping = false;
+      while (end < query.length) {
+        const current = query[end];
+        if (escaping) {
+          escaping = false;
+          end += 1;
+          continue;
+        }
+        if (current === "\\") {
+          escaping = true;
+          end += 1;
+          continue;
+        }
+        if (current === '"') {
+          inQuotes = !inQuotes;
+          end += 1;
+          continue;
+        }
+        if (!inQuotes && (isWhitespace(current) || current === "(" || current === ")")) {
+          break;
+        }
+        end += 1;
+      }
+      if (inQuotes) {
+        throw new Error(`Unterminated quoted string starting at position ${index + 1}.`);
+      }
+      const raw = query.slice(index, end);
+      const lowered = raw.toLowerCase();
+      if ((lowered === "or" || lowered === "and") && isBoundaryCharacter(query[end])) {
+        tokens.push({ type: lowered.toUpperCase() });
+      } else {
+        tokens.push({ type: "TERM", value: raw });
+      }
+      index = end;
+    }
+    return tokens;
+  }
+  function unescapeQuotedValue(value) {
+    let result = "";
+    let escaping = false;
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index];
+      if (escaping) {
+        result += character;
+        escaping = false;
+        continue;
+      }
+      if (character === "\\") {
+        escaping = true;
+        continue;
+      }
+      result += character;
+    }
+    if (escaping) {
+      result += "\\";
+    }
+    return result;
+  }
+  function parseRawTerm(rawTerm) {
+    const match = rawTerm.match(/^([^:><=]+)(>=|<=|:|=|>|<)(.+)$/);
+    if (!match) {
+      const isQuoted2 = rawTerm.startsWith('"') && rawTerm.endsWith('"');
+      return {
+        field: "name",
+        operator: ":",
+        value: isQuoted2 ? unescapeQuotedValue(rawTerm.slice(1, -1)) : rawTerm,
+        implicit: true,
+        ...isQuoted2 ? { quoted: true } : {}
+      };
+    }
+    const [, field, operator, value] = match;
+    if (!OPERATOR_PATTERN.test(operator)) {
+      throw new Error(`Unsupported operator "${operator}" in term "${rawTerm}".`);
+    }
+    if (!value.length) {
+      throw new Error(`Missing value in term "${rawTerm}".`);
+    }
+    const isQuoted = value.startsWith('"') && value.endsWith('"');
+    const normalizedValue = isQuoted ? unescapeQuotedValue(value.slice(1, -1)) : value;
+    return {
+      field,
+      operator,
+      value: normalizedValue,
+      ...isQuoted ? { quoted: true } : {}
+    };
+  }
+  function mergeImplicitBareNameTerms(clauses) {
+    const merged = [];
+    for (const clause of clauses) {
+      const previous = merged[merged.length - 1];
+      const canMerge = previous && previous.type === "term" && clause?.type === "term" && previous.field === "name" && clause.field === "name" && previous.operator === ":" && clause.operator === ":" && previous.implicit && clause.implicit && !previous.negated && !clause.negated && !previous.quoted && !clause.quoted;
+      if (canMerge) {
+        previous.value = `${previous.value} ${clause.value}`;
+        continue;
+      }
+      merged.push(clause);
+    }
+    return merged;
+  }
+  function createParser() {
+    return {
+      parse(query) {
+        if (typeof query !== "string" || !query.trim()) {
+          throw new Error("Query must be a non-empty string.");
+        }
+        const tokens = tokenize(query);
+        let position = 0;
+        function peek() {
+          return tokens[position];
+        }
+        function consume(expectedType) {
+          const token = tokens[position];
+          if (!token || token.type !== expectedType) {
+            throw new Error(`Expected token "${expectedType}" but found "${token?.type ?? "EOF"}".`);
+          }
+          position += 1;
+          return token;
+        }
+        function parsePrimary() {
+          const token = peek();
+          if (!token) {
+            throw new Error("Unexpected end of query.");
+          }
+          if (token.type === "TERM") {
+            position += 1;
+            return createTermNode(parseRawTerm(token.value));
+          }
+          if (token.type === "(") {
+            consume("(");
+            const clause = parseOrExpression();
+            consume(")");
+            return createGroupNode(clause);
+          }
+          throw new Error(`Unexpected token "${token.type}".`);
+        }
+        function parseUnary() {
+          const token = peek();
+          if (token?.type === "NOT") {
+            consume("NOT");
+            const clause = parseUnary();
+            if (clause.type === "term") {
+              return createTermNode({ ...clause, negated: !clause.negated });
+            }
+            return createGroupNode(clause, true);
+          }
+          return parsePrimary();
+        }
+        function parseAndExpression() {
+          const clauses = [parseUnary()];
+          while (true) {
+            const token = peek();
+            if (!token || token.type === ")" || token.type === "OR") {
+              break;
+            }
+            if (token.type === "AND") {
+              consume("AND");
+            }
+            clauses.push(parseUnary());
+          }
+          const normalizedClauses = mergeImplicitBareNameTerms(clauses);
+          if (normalizedClauses.length === 1) {
+            return normalizedClauses[0];
+          }
+          return createBooleanNode("and", normalizedClauses);
+        }
+        function parseOrExpression() {
+          const clauses = [parseAndExpression()];
+          while (peek()?.type === "OR") {
+            consume("OR");
+            clauses.push(parseAndExpression());
+          }
+          if (clauses.length === 1) {
+            return clauses[0];
+          }
+          return createBooleanNode("or", clauses);
+        }
+        const ast = parseOrExpression();
+        if (position < tokens.length) {
+          throw new Error(`Unexpected token "${tokens[position].type}" at the end of the query.`);
+        }
+        return ast;
+      }
+    };
+  }
+
+  // src/fields/is-not-token-index.js
+  var IS_NOT_SOURCE_VALUES = {
+    frame_effects: [
+      "legendary",
+      "inverted",
+      "extendedart",
+      "showcase",
+      "enchantment",
+      "etched",
+      "sunmoondfc",
+      "devoid",
+      "tombstone",
+      "fullart",
+      "snow",
+      "lesson",
+      "companion",
+      "colorshifted",
+      "compasslanddfc",
+      "fandfc",
+      "miracle",
+      "mooneldrazidfc",
+      "convertdfc",
+      "originpwdfc",
+      "draft",
+      "spree",
+      "shatteredglass",
+      "translucent",
+      "upsidedowndfc",
+      "waxingandwaningmoondfc"
+    ],
+    promo_types: [
+      "boosterfun",
+      "universesbeyond",
+      "datestamped",
+      "prerelease",
+      "stamped",
+      "promopack",
+      "setpromo",
+      "surgefoil",
+      "mediainsert",
+      "playtest",
+      "sldbonus",
+      "alchemy",
+      "galaxyfoil",
+      "silverfoil",
+      "poster",
+      "scroll",
+      "ripplefoil",
+      "instore",
+      "tourney",
+      "serialized",
+      "startercollection",
+      "doublerainbow",
+      "boxtopper",
+      "fnm",
+      "ffvii",
+      "ffxiv",
+      "planeswalkerdeck",
+      "rebalanced",
+      "sourcematerial",
+      "starterdeck",
+      "rainbowfoil",
+      "judgegift",
+      "ffx",
+      "ffvi",
+      "halofoil",
+      "firstplacefoil",
+      "beginnerbox",
+      "japanshowcase",
+      "buyabox",
+      "embossed",
+      "textured",
+      "bundle",
+      "thick",
+      "playerrewards",
+      "arenaleague",
+      "gameday",
+      "wizardsplaynetwork",
+      "stepandcompleat",
+      "jpwalker",
+      "release",
+      "ffix",
+      "portrait",
+      "raisedfoil",
+      "convention",
+      "dossier",
+      "schinesealtart",
+      "fracturefoil",
+      "manafoil",
+      "ffviii",
+      "storechampionship",
+      "ffxv",
+      "premiereshop",
+      "gilded",
+      "resale",
+      "event",
+      "ffxiii",
+      "ffxvi",
+      "intropack",
+      "confettifoil",
+      "ffiv",
+      "vault",
+      "standardshowdown",
+      "themepack",
+      "magnified",
+      "imagine",
+      "neonink",
+      "plastic",
+      "ffi",
+      "ffxii",
+      "ffv",
+      "ravnicacity",
+      "chocobotrackfoil",
+      "ffiii",
+      "oilslick",
+      "brawldeck",
+      "doubleexposure",
+      "ffii",
+      "ffxi",
+      "godzillaseries",
+      "draculaseries",
+      "league",
+      "concept",
+      "giftbox",
+      "commanderparty",
+      "playpromo",
+      "duels",
+      "invisibleink",
+      "headliner",
+      "openhouse",
+      "draftweekend",
+      "setextension",
+      "glossy",
+      "bringafriend",
+      "metal",
+      "dragonscalefoil",
+      "moonlitland",
+      "upsidedown",
+      "commanderpromo",
+      "cosmicfoil",
+      "singularityfoil",
+      "upsidedownback"
+    ],
+    set_type: [
+      "expansion",
+      "masters",
+      "commander",
+      "promo",
+      "core",
+      "draft_innovation",
+      "memorabilia",
+      "box",
+      "token",
+      "funny",
+      "duel_deck",
+      "masterpiece",
+      "starter",
+      "alchemy",
+      "planechase",
+      "eternal",
+      "treasure_chest",
+      "archenemy",
+      "from_the_vault",
+      "vanguard",
+      "premium_deck",
+      "minigame",
+      "arsenal",
+      "spellbook"
+    ],
+    rarity: ["rare", "common", "uncommon", "mythic", "special", "bonus"],
+    layout: [
+      "normal",
+      "token",
+      "art_series",
+      "transform",
+      "adventure",
+      "saga",
+      "split",
+      "planar",
+      "modal_dfc",
+      "mutate",
+      "emblem",
+      "vanguard",
+      "double_faced_token",
+      "scheme",
+      "reversible_card",
+      "meld",
+      "class",
+      "leveler",
+      "prototype",
+      "flip",
+      "host",
+      "case",
+      "augment"
+    ],
+    image_status: ["highres_scan", "lowres", "placeholder", "missing"],
+    games: ["paper", "mtgo", "arena", "astral", "sega"],
+    finishes: ["nonfoil", "foil", "etched"],
+    "all_parts.component": ["combo_piece", "token", "meld_part", "meld_result"]
+  };
+  var IS_DEFAULT_ATOMS = [
+    "not:showcase",
+    "not:extendedart",
+    "-border:borderless",
+    "not:fracturefoil",
+    "not:etched",
+    "not:stamped",
+    "not:datestamped",
+    "not:fullart",
+    "not:surgefoil",
+    "not:galaxyfoil",
+    "-st:masterpiece",
+    "-frame:future",
+    "-frame:colorshifted",
+    "not:playtest",
+    "-frame:inverted",
+    "-border:yellow"
+  ];
+  function createIsNotTokenFieldMap() {
+    const tokenFieldMap = {};
+    for (const [fieldPath, values] of Object.entries(IS_NOT_SOURCE_VALUES)) {
+      for (const value of values) {
+        if (!tokenFieldMap[value]) {
+          tokenFieldMap[value] = [];
+        }
+        tokenFieldMap[value].push(fieldPath);
+      }
+    }
+    return tokenFieldMap;
+  }
+
+  // src/fields/defaults.js
+  function parseBooleanValue(value) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    const normalized = String(value).toLowerCase();
+    if (normalized === "true" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "no") {
+      return false;
+    }
+    throw new Error(`Cannot coerce "${value}" into a boolean value.`);
+  }
+  function parseNumberValue(value) {
+    const numericValue = Number(value);
+    if (Number.isNaN(numericValue)) {
+      throw new Error(`Cannot coerce "${value}" into a numeric value.`);
+    }
+    return numericValue;
+  }
+  function normalizeKeywordValue(value) {
+    return String(value).trim().toLowerCase();
+  }
+  var RARITY_ORDER = ["common", "uncommon", "rare", "mythic", "special", "bonus"];
+  var RARITY_ALIASES = {
+    c: "common",
+    common: "common",
+    u: "uncommon",
+    uncommon: "uncommon",
+    r: "rare",
+    rare: "rare",
+    m: "mythic",
+    mythic: "mythic",
+    s: "special",
+    special: "special",
+    b: "bonus",
+    bonus: "bonus"
+  };
+  function parseRarityValue(value) {
+    const normalized = normalizeKeywordValue(value);
+    if (Object.prototype.hasOwnProperty.call(RARITY_ALIASES, normalized)) {
+      return RARITY_ALIASES[normalized];
+    }
+    throw new Error(`Unknown rarity expression "${value}".`);
+  }
+  var ORDER_VALUES = /* @__PURE__ */ new Set([
+    "cmc",
+    "power",
+    "toughness",
+    "set",
+    "name",
+    "usd",
+    "tix",
+    "eur",
+    "rarity",
+    "color",
+    "released",
+    "edhrec",
+    "oldest",
+    "newest"
+  ]);
+  var UNIQUE_ALIASES = {
+    cards: "cards",
+    card: "cards",
+    prints: "prints",
+    print: "prints",
+    art: "art"
+  };
+  var PREFER_ALIASES = {
+    oldest: "oldest",
+    newest: "newest",
+    "usd-low": "usd-low",
+    "usd-high": "usd-high",
+    promo: "promo",
+    default: "default",
+    atypical: "atypical",
+    ub: "ub",
+    universesbeyond: "ub",
+    notub: "notub",
+    notuniversesbeyond: "notub"
+  };
+  var DIRECTION_ALIASES = {
+    asc: "asc",
+    desc: "desc"
+  };
+  function parseOrderValue(value) {
+    const normalized = normalizeKeywordValue(value);
+    if (!ORDER_VALUES.has(normalized)) {
+      throw new Error(`Unknown order expression "${value}".`);
+    }
+    return normalized;
+  }
+  function parseUniqueValue(value) {
+    const normalized = normalizeKeywordValue(value);
+    if (Object.prototype.hasOwnProperty.call(UNIQUE_ALIASES, normalized)) {
+      return UNIQUE_ALIASES[normalized];
+    }
+    throw new Error(`Unknown unique expression "${value}".`);
+  }
+  function parsePreferValue(value) {
+    const normalized = normalizeKeywordValue(value);
+    if (Object.prototype.hasOwnProperty.call(PREFER_ALIASES, normalized)) {
+      return PREFER_ALIASES[normalized];
+    }
+    throw new Error(`Unknown prefer expression "${value}".`);
+  }
+  function parseDirectionValue(value) {
+    const normalized = normalizeKeywordValue(value);
+    if (Object.prototype.hasOwnProperty.call(DIRECTION_ALIASES, normalized)) {
+      return DIRECTION_ALIASES[normalized];
+    }
+    throw new Error(`Unknown direction expression "${value}".`);
+  }
+  function parseShortcutValue(value) {
+    return normalizeKeywordValue(value);
+  }
+  function createDefaultFieldDefinitions() {
+    const isNotTokenFieldMap = createIsNotTokenFieldMap();
+    return {
+      colors: {
+        aliases: ["c", "color"],
+        esPath: "colors",
+        esPaths: ["colors", "card_faces.colors"],
+        type: "color-set",
+        parseValue: parseColorExpression,
+        compile: compileColorField
+      },
+      color_identity: {
+        aliases: ["id", "identity"],
+        esPath: "color_identity",
+        type: "color-set",
+        parseValue: parseColorExpression,
+        compile: compileColorField
+      },
+      mana_value: {
+        aliases: ["mv", "cmc"],
+        esPath: "cmc",
+        type: "number",
+        parseValue: parseNumberValue,
+        compile: compileNumericField
+      },
+      is: {
+        aliases: ["is"],
+        esPath: "is",
+        type: "keyword",
+        parseValue: parseShortcutValue,
+        compile: compileIsShortcutField,
+        tokenFieldMap: isNotTokenFieldMap,
+        tokenExpansions: {
+          default: IS_DEFAULT_ATOMS
+        }
+      },
+      not: {
+        aliases: ["not"],
+        esPath: "not",
+        type: "keyword",
+        parseValue: parseShortcutValue,
+        compile: compileNotShortcutField,
+        tokenFieldMap: isNotTokenFieldMap
+      },
+      unique: {
+        aliases: ["unique"],
+        searchControl: true,
+        type: "control",
+        parseValue: parseUniqueValue,
+        compile: compileSearchUniqueField
+      },
+      order: {
+        aliases: ["order"],
+        searchControl: true,
+        type: "control",
+        parseValue: parseOrderValue,
+        compile: compileSearchOrderField
+      },
+      prefer: {
+        aliases: ["prefer"],
+        searchControl: true,
+        type: "control",
+        parseValue: parsePreferValue,
+        compile: compileSearchPreferField
+      },
+      direction: {
+        aliases: ["direction"],
+        searchControl: true,
+        type: "control",
+        parseValue: parseDirectionValue,
+        compile: compileSearchDirectionField
+      },
+      lang: {
+        aliases: ["language"],
+        searchControl: true,
+        type: "control",
+        parseValue: normalizeKeywordValue,
+        compile: compileSearchLangField
+      },
+      rarity: {
+        aliases: ["r"],
+        esPath: "rarity",
+        type: "keyword",
+        parseValue: parseRarityValue,
+        compile: compileOrderedKeywordField,
+        order: RARITY_ORDER
+      },
+      set: {
+        esPath: "set",
+        type: "keyword",
+        parseValue: normalizeKeywordValue,
+        compile: compileKeywordField
+      },
+      set_type: {
+        aliases: ["st"],
+        esPath: "set_type",
+        type: "keyword",
+        parseValue: normalizeKeywordValue,
+        compile: compileKeywordField
+      },
+      border_color: {
+        aliases: ["border"],
+        esPath: "border_color",
+        type: "keyword",
+        parseValue: normalizeKeywordValue,
+        compile: compileKeywordField
+      },
+      frame: {
+        aliases: [],
+        esPath: "frame",
+        esPaths: ["frame", "frame_effects"],
+        type: "keyword",
+        parseValue: normalizeKeywordValue,
+        compile: compileKeywordField
+      },
+      collector_number: {
+        aliases: ["cn"],
+        esPath: "collector_number",
+        type: "keyword",
+        parseValue: (value) => String(value).trim(),
+        compile: compileCollectorNumberField
+      },
+      usd: {
+        esPath: "prices.usd",
+        type: "number",
+        parseValue: parseNumberValue,
+        compile: compileNumericField
+      },
+      eur: {
+        esPath: "prices.eur",
+        type: "number",
+        parseValue: parseNumberValue,
+        compile: compileNumericField
+      },
+      tix: {
+        esPath: "prices.tix",
+        type: "number",
+        parseValue: parseNumberValue,
+        compile: compileNumericField
+      },
+      oracle_text: {
+        aliases: ["o", "oracle", "text"],
+        esPath: "oracle_text",
+        esPaths: ["oracle_text", "card_faces.oracle_text"],
+        type: "text",
+        compile: compileTextField
+      },
+      type_line: {
+        aliases: ["t", "type"],
+        esPath: "type_line",
+        esPaths: ["type_line", "card_faces.type_line"],
+        type: "text",
+        compile: compileTextField
+      },
+      keywords: {
+        aliases: ["kw", "keyword"],
+        esPath: "keywords",
+        type: "keyword",
+        parseValue: (value) => String(value).trim(),
+        compile: compileKeywordField
+      },
+      name: {
+        aliases: ["name", "n"],
+        esPath: "name",
+        type: "text",
+        compile: compileTextField
+      },
+      is_legendary: {
+        aliases: ["legendary", "is:legendary"],
+        esPath: "is_legendary",
+        type: "boolean",
+        parseValue: parseBooleanValue,
+        compile: compileBooleanField
+      }
+    };
+  }
+
+  // src/registry/index.js
+  function cloneFieldDefinition(definition) {
+    return {
+      ...definition,
+      aliases: [...definition.aliases ?? []]
+    };
+  }
+  function assertFieldDefinition(name, definition) {
+    if (!definition || typeof definition !== "object") {
+      throw new Error(`Field "${name}" must be an object.`);
+    }
+    if (!definition.searchControl && (typeof definition.esPath !== "string" || !definition.esPath)) {
+      throw new Error(`Field "${name}" must define a non-empty "esPath".`);
+    }
+    if (typeof definition.compile !== "function") {
+      throw new Error(`Field "${name}" must define a "compile" function.`);
+    }
+  }
+  function createRegistry() {
+    const fields = /* @__PURE__ */ new Map();
+    const aliases = /* @__PURE__ */ new Map();
+    function assertAliasAvailable(alias, fieldName, override) {
+      const existingFieldName = aliases.get(alias);
+      if (existingFieldName && existingFieldName !== fieldName && !override) {
+        throw new Error(
+          `Alias "${alias}" is already registered to "${existingFieldName}". Use override to replace it.`
+        );
+      }
+    }
+    function registerField(name, definition, options = {}) {
+      const { override = false } = options;
+      assertFieldDefinition(name, definition);
+      if (fields.has(name) && !override) {
+        throw new Error(`Field "${name}" is already registered. Use override to replace it.`);
+      }
+      const normalizedDefinition = cloneFieldDefinition(definition);
+      normalizedDefinition.name = name;
+      for (const alias of [name, ...normalizedDefinition.aliases]) {
+        assertAliasAvailable(alias, name, override);
+      }
+      if (override && fields.has(name)) {
+        const previous = fields.get(name);
+        for (const alias of [name, ...previous.aliases ?? []]) {
+          if (aliases.get(alias) === name) {
+            aliases.delete(alias);
+          }
+        }
+      }
+      fields.set(name, normalizedDefinition);
+      for (const alias of [name, ...normalizedDefinition.aliases]) {
+        aliases.set(alias, name);
+      }
+      return normalizedDefinition;
+    }
+    function resolveFieldName(nameOrAlias) {
+      return aliases.get(nameOrAlias) ?? nameOrAlias;
+    }
+    function getField(nameOrAlias) {
+      const resolvedName = resolveFieldName(nameOrAlias);
+      const definition = fields.get(resolvedName);
+      if (!definition) {
+        throw new Error(`Unknown field "${nameOrAlias}".`);
+      }
+      return definition;
+    }
+    function parseValue(nameOrAlias, rawValue) {
+      const definition = getField(nameOrAlias);
+      if (typeof definition.parseValue === "function") {
+        return definition.parseValue(rawValue, definition);
+      }
+      return rawValue;
+    }
+    function registerAlias(alias, fieldName, options = {}) {
+      const { override = false } = options;
+      const definition = getField(fieldName);
+      assertAliasAvailable(alias, definition.name, override);
+      aliases.set(alias, definition.name);
+      if (!definition.aliases.includes(alias)) {
+        definition.aliases.push(alias);
+      }
+    }
+    function extend(extension = {}) {
+      const { fields: nextFields = {}, aliases: nextAliases = {}, override = false } = extension;
+      for (const [fieldName, definition] of Object.entries(nextFields)) {
+        registerField(fieldName, definition, { override });
+      }
+      for (const [alias, fieldName] of Object.entries(nextAliases)) {
+        registerAlias(alias, fieldName, { override });
+      }
+    }
+    extend({
+      fields: createDefaultFieldDefinitions()
+    });
+    return {
+      extend,
+      getField,
+      parseValue,
+      registerAlias,
+      registerField,
+      resolveFieldName
+    };
+  }
+
+  // src/runtime/createEngine.js
+  function createCompilationContext(extension) {
+    const registry = createRegistry();
+    if (extension) {
+      registry.extend(extension);
+    }
+    const compiler = createCompiler({ registry });
+    return {
+      registry,
+      compiler
+    };
+  }
+  function createEngine(options = {}) {
+    const parser = createParser();
+    const profiles = /* @__PURE__ */ new Map();
+    profiles.set("default", createCompilationContext(options.extension));
+    function getProfileContext(profileName = "default") {
+      const context = profiles.get(profileName);
+      if (!context) {
+        throw new Error(`Unknown profile "${profileName}".`);
+      }
+      return context;
+    }
+    return {
+      parse(query) {
+        return parser.parse(query);
+      },
+      compile(queryOrAst, options2 = {}) {
+        const { profile = "default" } = options2;
+        const context = getProfileContext(profile);
+        const ast = typeof queryOrAst === "string" ? parser.parse(queryOrAst) : queryOrAst;
+        return context.compiler.compile(ast);
+      },
+      compileWithMeta(queryOrAst, options2 = {}) {
+        const { profile = "default" } = options2;
+        const context = getProfileContext(profile);
+        const ast = typeof queryOrAst === "string" ? parser.parse(queryOrAst) : queryOrAst;
+        return context.compiler.compileWithMeta(ast);
+      },
+      registerProfile(name, extension = {}, options2 = {}) {
+        if (!name || typeof name !== "string") {
+          throw new Error("Profile name must be a non-empty string.");
+        }
+        const { override = false } = options2;
+        if (profiles.has(name) && !override) {
+          throw new Error(`Profile "${name}" is already registered. Use override to replace it.`);
+        }
+        profiles.set(name, createCompilationContext(extension));
+        return this;
+      },
+      extendProfile(name, extension) {
+        const context = getProfileContext(name);
+        context.registry.extend(extension);
+        return this;
+      },
+      listProfiles() {
+        return [...profiles.keys()];
+      },
+      extend(extension, options2 = {}) {
+        const { profile = "default" } = options2;
+        const context = getProfileContext(profile);
+        context.registry.extend(extension);
+        return this;
+      },
+      registerAlias(alias, fieldName, options2) {
+        const profile = options2?.profile ?? "default";
+        const context = getProfileContext(profile);
+        context.registry.registerAlias(alias, fieldName, options2);
+        return this;
+      },
+      registerField(fieldName, definition, options2) {
+        const profile = options2?.profile ?? "default";
+        const context = getProfileContext(profile);
+        context.registry.registerField(fieldName, definition, options2);
+        return this;
+      },
+      resolveFieldName(nameOrAlias, options2 = {}) {
+        const { profile = "default" } = options2;
+        const context = getProfileContext(profile);
+        return context.registry.resolveFieldName(nameOrAlias);
+      }
+    };
+  }
+
+  // src/runtime/version.js
+  var VERSION = true ? "0.1.0" : "0.0.0-dev";
+  var RELEASE = true ? "0.1.0+6f6845d" : VERSION;
+  var BUILD_DATE = true ? "2026-03-20T10:08:52.219Z" : "unbundled";
+  var announced = false;
+  function announceBrowserBuild() {
+    if (announced || typeof window === "undefined" || typeof console?.info !== "function") {
+      return;
+    }
+    announced = true;
+    console.info(`[ScryfallQueryDSL] loaded ${RELEASE}`);
+  }
+
+  // src/index.js
+  announceBrowserBuild();
+  return __toCommonJS(index_exports);
+})();
