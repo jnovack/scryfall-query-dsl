@@ -181,6 +181,7 @@ Major missing areas:
 - exact-name `!`
 - regex syntax
 - `!=`
+- `lang:any`, `new:language`, and broader language-query semantics beyond ranking preference
 - full Scryfall-parity `is:` / `not:` semantics
 - `has:` / `include:` families
 - mana syntax
@@ -188,6 +189,11 @@ Major missing areas:
 - remaining display keywords
 
 See `docs/syntax-coverage.md` for the authoritative breakdown.
+
+Known sort-control gotcha:
+
+- `order:oldest` and `order:newest` are not valid `order` values at compile time.
+- Use `prefer:oldest` and `prefer:newest` for print recency behavior.
 
 ## Documentation Status
 

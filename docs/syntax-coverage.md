@@ -11,6 +11,7 @@ This project currently supports a small but useful subset of Scryfall-style synt
 - fielded terms like `field:value`, `field=value`, `field>value`, `field>=value`, `field<value`, `field<=value`
 - bare terms like `lightning` (compiled as `name:lightning`)
 - quoted field values like `name:"Lightning Bolt"` and `o:"choose one or both"`
+- language preference sorting with `lang:` / `language:`
 - implicit `AND`
 - explicit `and`
 - explicit `or`
@@ -45,7 +46,7 @@ This tracker mirrors the section order from `https://scryfall.com/docs/syntax` s
 | Games, Promos, & Spotlights | Partial | Some relevant token matching exists via `is:` / `not:` cross-reference fields. |
 | Year | Unsupported | Not implemented as built-ins yet. |
 | Reprints | Unsupported | Not implemented as built-ins yet. |
-| Languages | Unsupported | Not implemented as built-ins yet. |
+| Languages | Partial | `lang` / `language` preference sorting is implemented; broader language syntax (`lang:any`, `new:language`, `in:*`) is still unsupported. |
 | Shortcuts and Nicknames | Partial | `is:` / `not:` shortcut token matching exists but does not yet cover full Scryfall semantics. |
 | Negating Conditions | Partial | `-` negation works broadly; full `-field:value` parity work is in progress. |
 | Regular Expressions | Unsupported | Not implemented. |
@@ -175,6 +176,9 @@ These are the most important behavior differences even within superficially simi
 13. `keyword:` currently maps to the built-in `keywords` field alias.
    This is an exact `term` lookup on `keywords`, not full Scryfall keyword-ability search semantics.
 
+14. `order:oldest` and `order:newest` are not valid sort orders.
+   Use `prefer:oldest` or `prefer:newest` for print recency preference.
+
 ## Planned Support
 
 These are the most sensible next steps if the goal is closer Scryfall parity.
@@ -237,7 +241,7 @@ In Scryfall, this uses Scryfall's text-search behavior. In this library it compi
 ```txt
 m:{G}{U}
 pow>tou
-lang:japanese
+lang:any
 name:/\bizzet\b/
 !fire
 ```
