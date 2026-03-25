@@ -1,4 +1,5 @@
 import { createDefaultPrintingSorts, createFieldSort, createScriptSort } from "./helpers.js";
+import { DEFAULT_CONTROL_CONFIG } from "./control-config.js";
 
 const RARITY_RANKS = {
   common: 0,
@@ -110,39 +111,69 @@ function uniqueStrings(values) {
   return result;
 }
 
-function buildOrderSorts(order, direction) {
+function resolveControlPath(path, context) {
+  if (typeof path !== "string" || !path) {
+    throw new Error(`Compiler control configuration missing "${context}".`);
+  }
+
+  return path;
+}
+
+function buildOrderSorts(order, direction, controlConfig) {
   const normalizedDirection = direction ?? "asc";
+  const orderFields = controlConfig.orderFields ?? {};
+  const orderScriptFields = controlConfig.orderScriptFields ?? {};
 
   if (order === "cmc") {
-    return [createFieldSort("cmc", normalizedDirection, { unmapped_type: "double" })];
+    return [createFieldSort(resolveControlPath(orderFields.cmc, "orderFields.cmc"), normalizedDirection, { unmapped_type: "double" })];
   }
 
   if (order === "power") {
-    return [createFieldSort("power", normalizedDirection, { unmapped_type: "keyword" })];
+    return [
+      createFieldSort(resolveControlPath(orderFields.power, "orderFields.power"), normalizedDirection, {
+        unmapped_type: "double",
+      }),
+    ];
   }
 
   if (order === "toughness") {
-    return [createFieldSort("toughness", normalizedDirection, { unmapped_type: "keyword" })];
+    return [
+      createFieldSort(resolveControlPath(orderFields.toughness, "orderFields.toughness"), normalizedDirection, {
+        unmapped_type: "double",
+      }),
+    ];
   }
 
   if (order === "set") {
-    return [createFieldSort("set", normalizedDirection, { unmapped_type: "keyword" })];
+    return [createFieldSort(resolveControlPath(orderFields.set, "orderFields.set"), normalizedDirection, { unmapped_type: "keyword" })];
   }
 
   if (order === "name") {
-    return [createFieldSort("name.keyword", normalizedDirection, { unmapped_type: "keyword" })];
+    return [createFieldSort(resolveControlPath(orderFields.name, "orderFields.name"), normalizedDirection, { unmapped_type: "keyword" })];
   }
 
   if (order === "usd" || order === "eur" || order === "tix") {
-    return [createFieldSort(`prices.${order}`, normalizedDirection, { unmapped_type: "double" })];
+    return [
+      createFieldSort(resolveControlPath(orderFields[order], `orderFields.${order}`), normalizedDirection, {
+        unmapped_type: "double",
+      }),
+    ];
   }
 
   if (order === "edhrec") {
-    return [createFieldSort("edhrec_rank", normalizedDirection, { unmapped_type: "long" })];
+    return [
+      createFieldSort(resolveControlPath(orderFields.edhrec, "orderFields.edhrec"), normalizedDirection, {
+        unmapped_type: "long",
+      }),
+    ];
   }
 
   if (order === "released") {
-    return [createFieldSort("released_at", normalizedDirection, { unmapped_type: "keyword" })];
+    return [
+      createFieldSort(resolveControlPath(orderFields.released, "orderFields.released"), normalizedDirection, {
+        unmapped_type: "keyword",
+      }),
+    ];
   }
 
   if (order === "rarity") {
@@ -156,7 +187,7 @@ function buildOrderSorts(order, direction) {
           return params.ranks.containsKey(rarity) ? params.ranks.get(rarity) : params.fallback;
         `,
         {
-          field: "rarity",
+          field: resolveControlPath(orderScriptFields.rarity, "orderScriptFields.rarity"),
           fallback: 999,
           ranks: RARITY_RANKS,
         },
@@ -172,7 +203,7 @@ function buildOrderSorts(order, direction) {
           return doc.containsKey(params.field) && !doc[params.field].empty ? doc[params.field].size() : 0;
         `,
         {
-          field: "colors",
+          field: resolveControlPath(orderScriptFields.colors, "orderScriptFields.colors"),
         },
         normalizedDirection
       ),
@@ -182,74 +213,110 @@ function buildOrderSorts(order, direction) {
   throw new Error(`Unknown order expression "${order}".`);
 }
 
-function buildPreferSorts(prefer) {
+function buildPreferSorts(prefer, controlConfig) {
+  const preferConfig = controlConfig.prefer ?? {};
+
   if (prefer === "default") {
-    return createDefaultPrintingSorts();
+    return createDefaultPrintingSorts(preferConfig.defaultPrintingSortFields);
   }
 
   if (prefer === "oldest") {
+    const oldestFields = preferConfig.oldestFields ?? {};
     return [
-      createFieldSort("released_at", "asc", { unmapped_type: "keyword" }),
-      createFieldSort("collector_number", "asc", { unmapped_type: "keyword" }),
+      createFieldSort(resolveControlPath(oldestFields.releasedAt, "prefer.oldestFields.releasedAt"), "asc", {
+        unmapped_type: "keyword",
+      }),
+      createFieldSort(resolveControlPath(oldestFields.collectorNumber, "prefer.oldestFields.collectorNumber"), "asc", {
+        unmapped_type: "keyword",
+      }),
     ];
   }
 
   if (prefer === "newest") {
+    const newestFields = preferConfig.newestFields ?? {};
     return [
-      createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
-      createFieldSort("collector_number", "desc", { unmapped_type: "keyword" }),
+      createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+        unmapped_type: "keyword",
+      }),
+      createFieldSort(resolveControlPath(newestFields.collectorNumber, "prefer.newestFields.collectorNumber"), "desc", {
+        unmapped_type: "keyword",
+      }),
     ];
   }
 
   if (prefer === "usd-low") {
-    return [createFieldSort("prices.usd", "asc", { unmapped_type: "double" })];
+    return [createFieldSort(resolveControlPath(preferConfig.usdField, "prefer.usdField"), "asc", { unmapped_type: "double" })];
   }
 
   if (prefer === "usd-high") {
-    return [createFieldSort("prices.usd", "desc", { unmapped_type: "double" })];
+    return [
+      createFieldSort(resolveControlPath(preferConfig.usdField, "prefer.usdField"), "desc", { unmapped_type: "double" }),
+    ];
   }
 
   if (prefer === "promo") {
+    const newestFields = preferConfig.newestFields ?? {};
     return [
-      createFieldSort("promo", "desc", { unmapped_type: "boolean" }),
-      createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
+      createFieldSort(resolveControlPath(preferConfig.promoField, "prefer.promoField"), "desc", {
+        unmapped_type: "boolean",
+      }),
+      createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+        unmapped_type: "keyword",
+      }),
     ];
   }
 
   if (prefer === "ub") {
+    const newestFields = preferConfig.newestFields ?? {};
     return [
-      createFieldSort("universes_beyond", "desc", { unmapped_type: "boolean" }),
-      createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
+      createFieldSort(resolveControlPath(preferConfig.universesBeyondField, "prefer.universesBeyondField"), "desc", {
+        unmapped_type: "boolean",
+      }),
+      createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+        unmapped_type: "keyword",
+      }),
     ];
   }
 
   if (prefer === "notub") {
+    const newestFields = preferConfig.newestFields ?? {};
     return [
-      createFieldSort("universes_beyond", "asc", { unmapped_type: "boolean" }),
-      createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
+      createFieldSort(resolveControlPath(preferConfig.universesBeyondField, "prefer.universesBeyondField"), "asc", {
+        unmapped_type: "boolean",
+      }),
+      createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+        unmapped_type: "keyword",
+      }),
     ];
   }
 
   if (prefer === "atypical") {
+    const atypicalFields = preferConfig.atypicalFields ?? {};
+
     return [
       createScriptSort(
         `
           def score = 0;
-          if (doc.containsKey('promo') && !doc['promo'].empty && doc['promo'].value) {
+          if (doc.containsKey(params.promoField) && !doc[params.promoField].empty && doc[params.promoField].value) {
             score += 8;
           }
-          if (doc.containsKey('frame_effect') && !doc['frame_effect'].empty) {
+          if (doc.containsKey(params.frameEffectField) && !doc[params.frameEffectField].empty) {
             score += 4;
           }
-          if (doc.containsKey('full_art') && !doc['full_art'].empty && doc['full_art'].value) {
+          if (doc.containsKey(params.fullArtField) && !doc[params.fullArtField].empty && doc[params.fullArtField].value) {
             score += 2;
           }
-          if (doc.containsKey('oversized') && !doc['oversized'].empty && doc['oversized'].value) {
+          if (doc.containsKey(params.oversizedField) && !doc[params.oversizedField].empty && doc[params.oversizedField].value) {
             score += 1;
           }
           return score;
         `,
-        {},
+        {
+          promoField: resolveControlPath(atypicalFields.promo, "prefer.atypicalFields.promo"),
+          frameEffectField: resolveControlPath(atypicalFields.frameEffect, "prefer.atypicalFields.frameEffect"),
+          fullArtField: resolveControlPath(atypicalFields.fullArt, "prefer.atypicalFields.fullArt"),
+          oversizedField: resolveControlPath(atypicalFields.oversized, "prefer.atypicalFields.oversized"),
+        },
         "desc"
       ),
     ];
@@ -258,7 +325,7 @@ function buildPreferSorts(prefer) {
   throw new Error(`Unknown prefer expression "${prefer}".`);
 }
 
-function buildLangSorts(lang) {
+function buildLangSorts(lang, controlConfig) {
   return [
     createScriptSort(
       `
@@ -268,7 +335,7 @@ function buildLangSorts(lang) {
         return doc[params.field].value == params.lang ? 0 : 1;
       `,
       {
-        field: "lang",
+        field: resolveControlPath(controlConfig.langField, "langField"),
         lang,
       },
       "asc"
@@ -276,7 +343,7 @@ function buildLangSorts(lang) {
   ];
 }
 
-function applySearchControls(controls) {
+function applySearchControls(controls, controlConfig) {
   const state = {
     unique: null,
     order: null,
@@ -300,31 +367,32 @@ function applySearchControls(controls) {
   }
 
   const request = {};
+  const collapseFields = controlConfig.collapseFields ?? {};
 
   if (state.unique === "cards") {
     request.collapse = {
-      field: "oracle_id",
+      field: resolveControlPath(collapseFields.cards, "collapseFields.cards"),
     };
   } else if (state.unique === "art") {
     request.collapse = {
-      field: "illustration_id",
+      field: resolveControlPath(collapseFields.art, "collapseFields.art"),
     };
   }
 
   const sort = [];
 
   if (state.lang) {
-    sort.push(...buildLangSorts(state.lang));
+    sort.push(...buildLangSorts(state.lang, controlConfig));
   }
 
   if (state.order) {
-    sort.push(...buildOrderSorts(state.order, state.direction));
+    sort.push(...buildOrderSorts(state.order, state.direction, controlConfig));
   } else if (state.unique === "cards") {
-    sort.push(...buildOrderSorts("name", state.direction));
+    sort.push(...buildOrderSorts("name", state.direction, controlConfig));
   }
 
   if (state.prefer) {
-    sort.push(...buildPreferSorts(state.prefer));
+    sort.push(...buildPreferSorts(state.prefer, controlConfig));
   }
 
   if (sort.length) {
@@ -334,7 +402,7 @@ function applySearchControls(controls) {
   return request;
 }
 
-export function createCompiler({ registry }) {
+export function createCompiler({ registry, controlConfig = DEFAULT_CONTROL_CONFIG }) {
   function compileTerm(node) {
     const fieldDefinition = registry.getField(node.field);
     const value = registry.parseValue(node.field, node.value);
@@ -395,7 +463,7 @@ export function createCompiler({ registry }) {
     compile(ast) {
       const compiled = compileNode(ast);
       const query = compiled.clause ?? { match_all: {} };
-      const controls = applySearchControls(compiled.controls);
+      const controls = applySearchControls(compiled.controls, controlConfig);
       const hasControls = Object.keys(controls).length > 0;
 
       if (!hasControls) {
@@ -410,7 +478,7 @@ export function createCompiler({ registry }) {
     compileWithMeta(ast) {
       const compiled = compileNode(ast);
       const query = compiled.clause ?? { match_all: {} };
-      const controls = applySearchControls(compiled.controls);
+      const controls = applySearchControls(compiled.controls, controlConfig);
       const hasControls = Object.keys(controls).length > 0;
       const dsl = hasControls
         ? {

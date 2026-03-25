@@ -9,6 +9,8 @@ export {
   compileBooleanField,
   compileColorField,
   compileCollectorNumberField,
+  compileDateField,
+  compileLegalityField,
   compileKeywordField,
   compileIsShortcutField,
   compileNotShortcutField,
@@ -19,6 +21,7 @@ export {
   compileSearchPreferField,
   compileSearchUniqueField,
   compileNumericField,
+  compileYearField,
   parseColorExpression,
   compileTextField,
 } from "./compiler/helpers.js";

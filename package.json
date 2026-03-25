@@ -1,6 +1,6 @@
 {
   "name": "scryfall-query-dsl",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.1",
   "description": "Browser-friendly Scryfall-style syntax parser and Elasticsearch DSL compiler.",
   "type": "module",
   "main": "./dist/scryfall-query-dsl.cjs",

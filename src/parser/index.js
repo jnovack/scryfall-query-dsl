@@ -1,6 +1,7 @@
 import { createBooleanNode, createGroupNode, createTermNode } from "../ast/index.js";
 
-const OPERATOR_PATTERN = /^(>=|<=|:|=|>|<)$/;
+const OPERATOR_PATTERN = /^(!=|>=|<=|:|=|>|<)$/;
+const FIELD_TERM_PATTERN = /^([^:><=!]+)(!=|>=|<=|:|=|>|<)(.+)$/;
 
 function isWhitespace(character) {
   return /\s/.test(character);
@@ -113,8 +114,43 @@ function unescapeQuotedValue(value) {
   return result;
 }
 
+function parseExactNameBangTerm(rawTerm) {
+  const rawValue = rawTerm.slice(1);
+
+  if (!rawValue.length) {
+    throw new Error('Exact-name bang term is missing a value. Use !fire or !"sift through sands".');
+  }
+
+  const isQuoted = rawValue.startsWith("\"") && rawValue.endsWith("\"");
+
+  if (!isQuoted && FIELD_TERM_PATTERN.test(rawValue)) {
+    throw new Error(
+      `Fielded bang term "${rawTerm}" is not supported. Use bare exact-name bang syntax like !fire or !"sift through sands".`
+    );
+  }
+
+  const normalizedValue = isQuoted ? unescapeQuotedValue(rawValue.slice(1, -1)) : rawValue;
+
+  if (!normalizedValue.length) {
+    throw new Error(`Exact-name bang term "${rawTerm}" resolves to an empty value.`);
+  }
+
+  return {
+    field: "name",
+    operator: ":",
+    value: normalizedValue,
+    implicit: true,
+    exactNameBang: true,
+    ...(isQuoted ? { quoted: true } : {}),
+  };
+}
+
 function parseRawTerm(rawTerm) {
-  const match = rawTerm.match(/^([^:><=]+)(>=|<=|:|=|>|<)(.+)$/);
+  if (rawTerm.startsWith("!")) {
+    return parseExactNameBangTerm(rawTerm);
+  }
+
+  const match = rawTerm.match(FIELD_TERM_PATTERN);
 
   if (!match) {
     const isQuoted = rawTerm.startsWith("\"") && rawTerm.endsWith("\"");
@@ -146,37 +182,6 @@ function parseRawTerm(rawTerm) {
     value: normalizedValue,
     ...(isQuoted ? { quoted: true } : {}),
   };
-}
-
-function mergeImplicitBareNameTerms(clauses) {
-  const merged = [];
-
-  for (const clause of clauses) {
-    const previous = merged[merged.length - 1];
-    const canMerge =
-      previous &&
-      previous.type === "term" &&
-      clause?.type === "term" &&
-      previous.field === "name" &&
-      clause.field === "name" &&
-      previous.operator === ":" &&
-      clause.operator === ":" &&
-      previous.implicit &&
-      clause.implicit &&
-      !previous.negated &&
-      !clause.negated &&
-      !previous.quoted &&
-      !clause.quoted;
-
-    if (canMerge) {
-      previous.value = `${previous.value} ${clause.value}`;
-      continue;
-    }
-
-    merged.push(clause);
-  }
-
-  return merged;
 }
 
 export function createParser() {
@@ -257,13 +262,11 @@ export function createParser() {
           clauses.push(parseUnary());
         }
 
-        const normalizedClauses = mergeImplicitBareNameTerms(clauses);
-
-        if (normalizedClauses.length === 1) {
-          return normalizedClauses[0];
+        if (clauses.length === 1) {
+          return clauses[0];
         }
 
-        return createBooleanNode("and", normalizedClauses);
+        return createBooleanNode("and", clauses);
       }
 
       function parseOrExpression() {

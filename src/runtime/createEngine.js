@@ -1,15 +1,17 @@
 import { createCompiler } from "../compiler/index.js";
+import { createPrefixedControlConfig } from "../compiler/control-config.js";
 import { createParser } from "../parser/index.js";
+import { createCtxCardProfileExtension } from "../profiles/ctx-card.js";
 import { createRegistry } from "../registry/index.js";
 
-function createCompilationContext(extension) {
+function createCompilationContext({ extension, controlConfig } = {}) {
   const registry = createRegistry();
 
   if (extension) {
     registry.extend(extension);
   }
 
-  const compiler = createCompiler({ registry });
+  const compiler = createCompiler({ registry, controlConfig });
 
   return {
     registry,
@@ -21,7 +23,14 @@ export function createEngine(options = {}) {
   const parser = createParser();
   const profiles = new Map();
 
-  profiles.set("default", createCompilationContext(options.extension));
+  profiles.set("default", createCompilationContext({ extension: options.extension }));
+  profiles.set(
+    "ctx.card",
+    createCompilationContext({
+      extension: createCtxCardProfileExtension(),
+      controlConfig: createPrefixedControlConfig("card"),
+    })
+  );
 
   function getProfileContext(profileName = "default") {
     const context = profiles.get(profileName);
@@ -59,7 +68,7 @@ export function createEngine(options = {}) {
         throw new Error(`Profile "${name}" is already registered. Use override to replace it.`);
       }
 
-      profiles.set(name, createCompilationContext(extension));
+      profiles.set(name, createCompilationContext({ extension }));
       return this;
     },
     extendProfile(name, extension) {

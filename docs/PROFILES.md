@@ -1,116 +1,152 @@
-# Profiles
+# Profiles, Field Definitions, and Custom Schemas
 
-Profiles allow one `scryfall-query-dsl` engine instance to compile the same query language against multiple document layouts.
+Profiles let one query language compile against multiple Elasticsearch document layouts.
 
-Typical use case:
-
-- profile `default`: native Scryfall-like card index fields (`colors`, `frame`, `color_identity`, etc.)
-- profile `moxfield_collection`: collection-entry layout where most searchable card fields live under `card.*`
-
-With profiles, consumers can toggle data sources without changing parser logic or user query syntax.
-
----
+If you need method signatures (`createEngine`, `compile`, `registerProfile`, etc.), use [API.md](./API.md).
+This document focuses on schema wiring: field definitions, compiler helpers, and profile composition.
 
 ## Why Profiles Exist
 
-Runtime `extend()` is useful when you have one schema.
+Use profiles when the same user query syntax must target different field paths.
 
-Profiles solve a different problem: one application may target multiple schemas where field paths and semantics differ.
+Common pattern:
 
-Examples:
+- `default` profile for native Scryfall-shaped docs
+- `ctx.card` profile for card-nested docs (`card.*`)
+- custom profile(s) for downstream/enriched collections
 
-- `frame:2015` would hit `frame` and `frame_effects` in the default profile, but `card.frame` in a collection profile
-- `inclusion_percent>1` may exist only in enriched collection docs (for example `slugs.inclusion_percent`), not in the default index
-- `is:`/`not:` tokens may be valid in one schema and unknown in another
+## Built-in Profiles
 
----
+- `default`: base Scryfall-oriented built-ins
+- `ctx.card`: built-in alternate profile that remaps built-in query paths to `card.*`
 
-## Engine API
+`ctx.card` is derived from built-ins, not manually copied. It is intended to stay in parity as built-ins evolve.
 
-`createEngine()` now supports profile-aware compile and registration methods.
+## Field Definition Shape
 
-### `engine.registerProfile(name, extension, options?)`
+A field definition typically includes:
 
-Registers a named profile with its own registry and compiler context.
+- `aliases`: alternate query names
+- `esPath`: primary Elasticsearch field path
+- `esPaths` (optional): multiple paths for disjunction behavior
+- `type`: semantic field type label
+- `operators`: explicitly supported operators
+- `parseValue` (optional): input coercion/parser
+- `compile`: compiler function
+- optional behavior metadata depending on compiler (for example `legalityStatus`, `tokenFieldMap`)
+- optional behavior metadata depending on compiler (for example `legalityStatus`, `tokenFieldMap`, `semanticShortcuts`)
 
-- `name`: profile name (string)
-- `extension`: same shape as `engine.extend(...)`
-- `options.override` (default `false`): allow replacing an existing profile with the same name
+Example:
 
-### `engine.extendProfile(name, extension)`
+```js
+{
+  aliases: ["ip"],
+  esPath: "slugs.inclusion_percent",
+  type: "number",
+  operators: [":", "=", ">", ">=", "<", "<=", "!="],
+  parseValue: Number,
+  compile: compileNumericField
+}
+```
 
-Extends an already-registered profile.
+## Compiler Helper Guide
 
-### `engine.listProfiles()`
+These helpers are exported to make profile wiring predictable.
 
-Returns all profile names (always includes `default`).
+### Callback Contract
 
-### `engine.compile(queryOrAst, { profile })`
+Compiler helpers receive:
 
-Compiles against the selected profile.
+```js
+{
+  fieldName,   // parsed field key (can be alias)
+  definition,  // resolved field definition
+  operator,    // parsed operator
+  value,       // parsed/coerced value
+  node,        // parser metadata (quoted, negated, exactNameBang)
+  registry     // registry access (used by shortcut compilers)
+}
+```
 
-If `profile` is omitted, `default` is used.
+### `compileKeywordField`
 
-### `engine.compileWithMeta(queryOrAst, { profile })`
+Use for categorical exact matching (`set`, `st`, `border`, `frame`, custom enums).
 
-Same as `compile`, but returns DSL plus metadata/warnings for unknown shortcut tokens.
+### `compileNumericField`
 
----
+Use for numeric fields (`mv`, `pow`/`power`, `tou`/`toughness`, prices, custom metrics). Supports range/equality behavior.
 
-## Profile Semantics
+### `compileTextField`
 
-Each profile has:
+Use for free-text fields (`name`, `oracle`, `type`, `flavor`).
 
-- its own field registry
-- its own alias map
-- its own parser->compiler interpretation of fields/shortcuts
+Note: built-in `name` uses include-style behavior for both `:` and `=`.
 
-This means profile overrides are isolated:
+### `compileColorField` + `parseColorExpression`
 
-- changing `frame` in `moxfield_collection` does not change `frame` in `default`
-- adding custom fields to one profile does not leak into another profile
+Use for color and identity semantics (`c`/`color`, `id`/`identity`).
 
----
+### `compileCollectorNumberField`
 
-## Example: Moxfield-Style Collection Profile
+Use when collector-number comparisons must behave numerically on string-backed fields.
 
-Below is a concrete profile that supports:
+### `compileOrderedKeywordField`
 
-- `color<=mardu`
-- `legal:commander`
-- `is:legendary` / `not:legendary`
-- `frame:2015`
-- `inclusion_percent>1`
+Use for ranked keyword domains (for example rarity order).
+
+### `compileLegalityField`
+
+Use for legality-map fields where value is a format key and status is configured.
+
+Typical status mapping:
+
+- `"legal"` for `legal`/`f`/`format`
+- `"not_legal"` for `banned`
+- `"restricted"` for `restricted`
+
+### `compileDateField` and `compileYearField`
+
+Use for release date/year behavior over a date field (usually `released_at`).
+
+- `compileDateField`: direct date comparisons (`YYYY-MM-DD`)
+- `compileYearField`: year-to-date-range expansion
+
+### `compileIsShortcutField` / `compileNotShortcutField`
+
+Use for token shortcut families (`is:...`, `not:...`) with `tokenFieldMap`.
+`compileIsShortcutField` also supports token-specific semantic handlers via `semanticShortcuts` (for example built-in `is:commander`).
+
+### Search Control Helpers
+
+- `compileSearchUniqueField`
+- `compileSearchOrderField`
+- `compileSearchPreferField`
+- `compileSearchDirectionField`
+- `compileSearchLangField`
+
+These emit control directives, not direct filter clauses.
+
+## Minimum Profile Flow
+
+This is the minimum custom schema flow:
+
+1. Create engine.
+2. Register profile with schema-appropriate field paths.
+3. Compile query using `profile` option.
 
 ```js
 import {
   createEngine,
   compileColorField,
-  compileIsShortcutField,
   compileKeywordField,
-  compileNotShortcutField,
   compileNumericField,
-  compileLegalField,
-  parseColorExpression,
+  compileLegalityField,
+  parseColorExpression
 } from "scryfall-query-dsl";
-
-function compileLegalField({ fieldName, operator, value }) {
-  if (operator !== ":" && operator !== "=") {
-    throw new Error(
-      `Field "${fieldName}" does not support operator "${operator}". Supported operators: :, =`
-    );
-  }
-
-  return {
-    term: {
-      [`card.legalities.${value}`]: "legal",
-    },
-  };
-}
 
 const engine = createEngine();
 
-engine.registerProfile("moxfield_collection", {
+engine.registerProfile("collection", {
   override: true,
   fields: {
     colors: {
@@ -119,94 +155,74 @@ engine.registerProfile("moxfield_collection", {
       esPaths: ["card.colors", "card.card_faces.colors"],
       type: "color-set",
       parseValue: parseColorExpression,
-      compile: compileColorField,
-    },
-    color_identity: {
-      aliases: ["id", "identity"],
-      esPath: "card.color_identity",
-      type: "color-set",
-      parseValue: parseColorExpression,
-      compile: compileColorField,
+      compile: compileColorField
     },
     legal: {
       aliases: ["f", "format"],
       esPath: "card.legalities",
       type: "keyword",
-      parseValue: (value) => String(value).trim().toLowerCase(),
-      compile: compileLegalField,
+      operators: [":", "="],
+      parseValue: (v) => String(v).trim().toLowerCase(),
+      compile: compileLegalityField,
+      legalityStatus: "legal"
     },
     frame: {
       aliases: ["frame"],
       esPath: "card.frame",
       type: "keyword",
-      parseValue: (value) => String(value).trim().toLowerCase(),
-      compile: compileKeywordField,
+      operators: [":", "="],
+      parseValue: (v) => String(v).trim().toLowerCase(),
+      compile: compileKeywordField
     },
     inclusion_percent: {
       aliases: ["ip"],
       esPath: "slugs.inclusion_percent",
       type: "number",
+      operators: [":", "=", ">", ">=", "<", "<=", "!="],
       parseValue: Number,
-      compile: compileNumericField,
-    },
-    is: {
-      aliases: ["is"],
-      esPath: "is",
-      type: "keyword",
-      parseValue: (value) => String(value).trim().toLowerCase(),
-      compile: compileIsShortcutField,
-      tokenFieldMap: {
-        legendary: ["card.type_line"],
-      },
-    },
-    not: {
-      aliases: ["not"],
-      esPath: "not",
-      type: "keyword",
-      parseValue: (value) => String(value).trim().toLowerCase(),
-      compile: compileNotShortcutField,
-      tokenFieldMap: {
-        legendary: ["card.type_line"],
-      },
-    },
-  },
+      compile: compileNumericField
+    }
+  }
 });
 
-const query = "color<=mardu legal:commander is:legendary frame:2015 inclusion_percent>1";
-const dsl = engine.compile(query, { profile: "moxfield_collection" });
+const dsl = engine.compile("color<=mardu legal:commander frame:2015 ip>1", {
+  profile: "collection"
+});
 ```
 
----
+## Custom Schema Support Guidelines
 
-## Recommended Usage Pattern in Apps
+- Keep operators explicit; reject unsupported operators loudly.
+- Keep `parseValue` deterministic and minimal.
+- Prefer helper compilers for common behavior.
+- Use custom compilers only when helper semantics do not fit your schema.
+- Keep token shortcuts explicit (`tokenFieldMap`) so behavior stays explainable.
 
-In applications that can search multiple data sources:
+## Mapping Prerequisites (Common Gotchas)
 
-1. Initialize one engine.
-2. Register one profile per source/index schema.
-3. Store active source setting (for example in local storage).
-4. Compile with `engine.compile(query, { profile: activeProfile })`.
-5. Send compiled DSL to the corresponding Elasticsearch index.
+Some built-in behaviors assume corresponding subfields exist in mappings:
 
-This keeps query UX consistent while preserving schema correctness.
+- loose text behavior uses `.prefix` / `.infix` subfields where configured
+- exact-name bang behavior expects keyword paths like `name.keyword`
+- numeric PT behavior expects `power_num` / `toughness_num` mappings
+- profile remaps (such as `ctx.card`) require corresponding nested fields to exist at target paths
 
----
+If mappings do not provide those fields, behavior may degrade or fail depending on query/operator.
 
 ## Error Behavior
 
-- Unknown profile at compile time throws `Unknown profile "<name>"`.
-- Registering an existing profile without `options.override: true` throws.
-- Field-definition validation remains the same as base registry validation.
-- Unknown `is:` / `not:` tokens remain non-fatal when using `compileWithMeta()` and are reported in metadata.
+Expect loud failures for:
 
----
+- unknown profile names at compile time
+- malformed field definitions
+- unsupported operators per field
+- parse/coercion failures in field parsers
 
-## Notes on Scope
+For non-fatal shortcut token handling (`is:` / `not:` unknown tokens), use `compileWithMeta()` from [API.md](./API.md).
 
-Profiles support both simple path remaps and semantic overrides, but the implementation is still field-definition driven:
+## Related Docs
 
-- use built-in helper compilers for common behavior
-- add custom compilers for schema-specific semantics (for example legalities layout)
-- keep token shortcuts explicit per profile for clarity
-
-For first-order support, profile token maps should stay explicit and single-field where possible; aggregate shortcuts can be added later as dedicated profile behavior.
+- API details: [API.md](./API.md)
+- Syntax parity/deviations: [SYNTAX-COVERAGE.md](./SYNTAX-COVERAGE.md)
+- Maintenance workflow: [MAINTENANCE.md](./MAINTENANCE.md)
+- Current project checkpoint: [session-handoff.md](./session-handoff.md)

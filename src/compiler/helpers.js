@@ -118,6 +118,128 @@ function compilePathDisjunction(clauses) {
   };
 }
 
+function negateCompiledClause(clause) {
+  return {
+    bool: {
+      must_not: [clause],
+    },
+  };
+}
+
+function createMatchClause(fieldPath, value, options = {}) {
+  if (!Object.keys(options).length) {
+    return {
+      match: {
+        [fieldPath]: value,
+      },
+    };
+  }
+
+  return {
+    match: {
+      [fieldPath]: {
+        query: value,
+        ...options,
+      },
+    },
+  };
+}
+
+function createPartialPathVariants(basePath, subfields = []) {
+  if (!Array.isArray(subfields) || !subfields.length) {
+    return [basePath];
+  }
+
+  return [basePath, ...subfields.map((subfield) => `${basePath}.${subfield}`)];
+}
+
+function compileNameTextField({ definition, value, node }) {
+  const basePath = definition.esPath;
+  const exactEsPaths =
+    Array.isArray(definition.exactEsPaths) && definition.exactEsPaths.length
+      ? definition.exactEsPaths
+      : [`${basePath}.keyword`];
+  const hasWhitespace = /\s/.test(value);
+  const operator = hasWhitespace ? "and" : undefined;
+  const shortestTokenLength = value
+    .trim()
+    .split(/\s+/)
+    .reduce((shortest, token) => Math.min(shortest, token.length), Infinity);
+  const fuzzyPrefixLength = Number.isFinite(shortestTokenLength) ? Math.min(3, Math.max(1, shortestTokenLength)) : 1;
+  const fuzzyOptions = {
+    fuzziness: "AUTO",
+    prefix_length: fuzzyPrefixLength,
+    ...(operator ? { operator } : {}),
+    boost: 1,
+  };
+
+  if (node?.exactNameBang) {
+    const terms = exactEsPaths.map((esPath) => ({
+      term: {
+        [esPath]: value,
+      },
+    }));
+
+    return compilePathDisjunction(terms);
+  }
+
+  if (node?.quoted) {
+    return {
+      match_phrase: {
+        [basePath]: value,
+      },
+    };
+  }
+
+  return {
+    bool: {
+      should: [
+        createMatchClause(basePath, value, {
+          ...(operator ? { operator } : {}),
+          boost: 4,
+        }),
+        createMatchClause(`${basePath}.prefix`, value, {
+          ...(operator ? { operator } : {}),
+          boost: 3,
+        }),
+        createMatchClause(`${basePath}.infix`, value, {
+          ...(operator ? { operator } : {}),
+          boost: 2,
+        }),
+        createMatchClause(basePath, value, fuzzyOptions),
+      ],
+      minimum_should_match: 1,
+    },
+  };
+}
+
+function compileDateComparisonClause(esPath, operator, value) {
+  if (operator === ":" || operator === "=") {
+    return {
+      term: {
+        [esPath]: value,
+      },
+    };
+  }
+
+  return {
+    range: {
+      [esPath]: {
+        [RANGE_OPERATOR_MAP[operator]]: value,
+      },
+    },
+  };
+}
+
+function compilePartialTextField({ definition, value }) {
+  const esPaths = Array.isArray(definition.esPaths) && definition.esPaths.length ? definition.esPaths : [definition.esPath];
+  const subfields = definition.partialSubfields ?? ["prefix", "infix"];
+  const pathVariants = esPaths.flatMap((path) => createPartialPathVariants(path, subfields));
+  const clauses = pathVariants.map((path) => createMatchClause(path, value));
+
+  return compilePathDisjunction(clauses);
+}
+
 export function compileNumericField({ fieldName, definition, operator, value }) {
   const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
   assertSupportedOperator(fieldName, supportedOperators, operator);
@@ -128,6 +250,14 @@ export function compileNumericField({ fieldName, definition, operator, value }) 
         [definition.esPath]: value,
       },
     };
+  }
+
+  if (operator === "!=") {
+    return negateCompiledClause({
+      term: {
+        [definition.esPath]: value,
+      },
+    });
   }
 
   return {
@@ -150,6 +280,10 @@ export function compileKeywordField({ fieldName, definition, operator, value }) 
     },
   }));
 
+  if (operator === "!=") {
+    return negateCompiledClause(compilePathDisjunction(terms));
+  }
+
   return compilePathDisjunction(terms);
 }
 
@@ -157,26 +291,14 @@ export function compileTextField({ fieldName, definition, operator, value, node 
   const supportedOperators = definition.operators ?? [":", "="];
   assertSupportedOperator(fieldName, supportedOperators, operator);
   const esPaths = Array.isArray(definition.esPaths) && definition.esPaths.length ? definition.esPaths : [definition.esPath];
+  const normalizedFieldName = definition.name ?? fieldName;
 
-  if (fieldName === "name" && operator === ":" && typeof value === "string" && esPaths.length === 1) {
-    if (node?.quoted) {
-      return {
-        match_phrase: {
-          [definition.esPath]: value,
-        },
-      };
-    }
-
-    if (node?.implicit && /\s/.test(value)) {
-      return {
-        match: {
-          [definition.esPath]: {
-            query: value,
-            operator: "and",
-          },
-        },
-      };
-    }
+  if (normalizedFieldName === "name" && (operator === ":" || operator === "=") && typeof value === "string" && esPaths.length === 1) {
+    return compileNameTextField({
+      definition,
+      value,
+      node,
+    });
   }
 
   if (operator === "=") {
@@ -188,11 +310,14 @@ export function compileTextField({ fieldName, definition, operator, value, node 
     return compilePathDisjunction(terms);
   }
 
-  const matches = esPaths.map((esPath) => ({
-    match: {
-      [esPath]: value,
-    },
-  }));
+  if (definition.enablePartialSubfields) {
+    return compilePartialTextField({
+      definition,
+      value,
+    });
+  }
+
+  const matches = esPaths.map((esPath) => createMatchClause(esPath, value));
 
   return compilePathDisjunction(matches);
 }
@@ -238,6 +363,93 @@ export function compileSearchDirectionField(args) {
 
 export function compileSearchLangField(args) {
   return compileSearchDirectiveField({ ...args, directive: "lang" });
+}
+
+export function compileLegalityField({ fieldName, definition, operator, value }) {
+  const supportedOperators = definition.operators ?? [":", "="];
+  assertSupportedOperator(fieldName, supportedOperators, operator);
+
+  const legalityStatus = definition.legalityStatus ?? "legal";
+
+  return {
+    term: {
+      [`${definition.esPath}.${value}`]: legalityStatus,
+    },
+  };
+}
+
+export function compileDateField({ fieldName, definition, operator, value }) {
+  const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+  assertSupportedOperator(fieldName, supportedOperators, operator);
+
+  return compileDateComparisonClause(definition.esPath, operator, value);
+}
+
+export function compileYearField({ fieldName, definition, operator, value }) {
+  const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+  assertSupportedOperator(fieldName, supportedOperators, operator);
+  const year = Number(value);
+
+  if (!Number.isInteger(year)) {
+    throw new Error(`Year comparisons require an integer year value. Received "${value}".`);
+  }
+
+  const esPath = definition.esPath;
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+
+  if (operator === ":" || operator === "=") {
+    return {
+      range: {
+        [esPath]: {
+          gte: yearStart,
+          lte: yearEnd,
+        },
+      },
+    };
+  }
+
+  if (operator === ">") {
+    return {
+      range: {
+        [esPath]: {
+          gt: yearEnd,
+        },
+      },
+    };
+  }
+
+  if (operator === ">=") {
+    return {
+      range: {
+        [esPath]: {
+          gte: yearStart,
+        },
+      },
+    };
+  }
+
+  if (operator === "<") {
+    return {
+      range: {
+        [esPath]: {
+          lt: yearStart,
+        },
+      },
+    };
+  }
+
+  if (operator === "<=") {
+    return {
+      range: {
+        [esPath]: {
+          lte: yearEnd,
+        },
+      },
+    };
+  }
+
+  throw new Error(`Unsupported operator "${operator}" for field "${fieldName}".`);
 }
 
 function normalizeShortcutCompiledClause(clause) {
@@ -318,10 +530,138 @@ function compileIsDefaultShortcut({ definition, token, term, registry }) {
   };
 }
 
-export function compileIsShortcutField({ definition, value, node, registry }) {
+function compileCommanderSemanticShortcut(tokenConfig) {
+  const legalityPath = tokenConfig?.legalityPath;
+  const typePaths = Array.isArray(tokenConfig?.typePaths) ? tokenConfig.typePaths : [];
+  const oraclePaths = Array.isArray(tokenConfig?.oraclePaths) ? tokenConfig.oraclePaths : [];
+  const powerPath = tokenConfig?.powerPath;
+  const toughnessPath = tokenConfig?.toughnessPath;
+
+  if (
+    typeof legalityPath !== "string" ||
+    !legalityPath ||
+    !typePaths.length ||
+    !oraclePaths.length ||
+    typeof powerPath !== "string" ||
+    !powerPath ||
+    typeof toughnessPath !== "string" ||
+    !toughnessPath
+  ) {
+    throw new Error("Semantic shortcut \"is:commander\" is missing required path configuration.");
+  }
+
+  const legendaryClause = {
+    bool: {
+      should: typePaths.map((path) =>
+        createMatchClause(path, "legendary", {
+          operator: "and",
+        })
+      ),
+      minimum_should_match: 1,
+    },
+  };
+
+  const artifactOrCreatureClause = {
+    bool: {
+      should: [
+        ...typePaths.map((path) =>
+          createMatchClause(path, "artifact", {
+            operator: "and",
+          })
+        ),
+        ...typePaths.map((path) =>
+          createMatchClause(path, "creature", {
+            operator: "and",
+          })
+        ),
+      ],
+      minimum_should_match: 1,
+    },
+  };
+
+  const textExceptionClause = {
+    bool: {
+      should: oraclePaths.map((path) => ({
+        match_phrase: {
+          [path]: "can be your commander",
+        },
+      })),
+      minimum_should_match: 1,
+    },
+  };
+
+  return {
+    bool: {
+      should: [
+        {
+          bool: {
+            must: [
+              {
+                bool: {
+                  must_not: [
+                    {
+                      term: {
+                        [legalityPath]: "banned",
+                      },
+                    },
+                  ],
+                },
+              },
+              legendaryClause,
+              artifactOrCreatureClause,
+              { exists: { field: powerPath } },
+              { exists: { field: toughnessPath } },
+            ],
+          },
+        },
+        textExceptionClause,
+      ],
+      minimum_should_match: 1,
+    },
+  };
+}
+
+function compileIsSemanticShortcut({ definition, token, term }) {
+  const semanticConfig = definition.semanticShortcuts?.[token];
+
+  if (!semanticConfig) {
+    return null;
+  }
+
+  if (semanticConfig.kind !== "commander") {
+    throw new Error(`Unsupported semantic shortcut kind "${semanticConfig.kind}" for token "${token}".`);
+  }
+
+  return {
+    __sqdsl_clause: compileCommanderSemanticShortcut(semanticConfig),
+    __sqdsl_meta: {
+      type: "shortcut-term",
+      field: definition.name,
+      token,
+      term,
+      valid: true,
+      matchedFields: ["semantic-shortcut"],
+      semanticKind: semanticConfig.kind,
+    },
+  };
+}
+
+export function compileIsShortcutField({ fieldName, definition, value, node, registry }) {
+  const supportedOperators = definition.operators ?? [":", "="];
+  assertSupportedOperator(fieldName, supportedOperators, node?.operator ?? ":");
   const token = String(value).toLowerCase();
   const mappedFields = definition.tokenFieldMap?.[token] ?? [];
   const term = `${definition.name}:${token}`;
+  const semanticShortcut = compileIsSemanticShortcut({
+    definition,
+    token,
+    term,
+  });
+
+  if (semanticShortcut) {
+    return semanticShortcut;
+  }
+
   const expansion = compileIsDefaultShortcut({
     definition,
     token,
@@ -375,7 +715,9 @@ export function compileIsShortcutField({ definition, value, node, registry }) {
   };
 }
 
-export function compileNotShortcutField({ definition, value, node }) {
+export function compileNotShortcutField({ fieldName, definition, value, node }) {
+  const supportedOperators = definition.operators ?? [":", "="];
+  assertSupportedOperator(fieldName, supportedOperators, node?.operator ?? ":");
   const token = String(value).toLowerCase();
   const mappedFields = definition.tokenFieldMap?.[token] ?? [];
   const term = `${definition.name}:${token}`;
@@ -437,17 +779,31 @@ export function createScriptSort(source, params, direction = "asc") {
   };
 }
 
-export function createDefaultPrintingSorts() {
+// Build the prefer:default sort chain using explicit field paths so callers
+// can remap the same behavior to alternate profile layouts.
+export function createDefaultPrintingSorts(fields = {}) {
+  const {
+    fullArt = "full_art",
+    promoTypes = "promo_types",
+    frameEffects = "frame_effects",
+    setType = "set_type",
+    frame = "frame",
+    finishes = "finishes",
+    borderColor = "border_color",
+    releasedAt = "released_at",
+    collectorNumber = "collector_number",
+  } = fields;
+
   return [
-    createFieldSort("full_art", "asc", { unmapped_type: "boolean" }),
-    createFieldSort("promo_types", "asc", { unmapped_type: "keyword", missing: "_first" }),
-    createFieldSort("frame_effects", "asc", { unmapped_type: "keyword", missing: "_first" }),
-    createFieldSort("set_type", "asc", { unmapped_type: "keyword" }),
-    createFieldSort("frame", "asc", { unmapped_type: "keyword" }),
-    createFieldSort("finishes", "desc", { unmapped_type: "keyword" }),
-    createFieldSort("border_color", "desc", { unmapped_type: "keyword" }),
-    createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
-    createFieldSort("collector_number", "desc", { unmapped_type: "keyword" }),
+    createFieldSort(fullArt, "asc", { unmapped_type: "boolean" }),
+    createFieldSort(promoTypes, "asc", { unmapped_type: "keyword", missing: "_first" }),
+    createFieldSort(frameEffects, "asc", { unmapped_type: "keyword", missing: "_first" }),
+    createFieldSort(setType, "asc", { unmapped_type: "keyword" }),
+    createFieldSort(frame, "asc", { unmapped_type: "keyword" }),
+    createFieldSort(finishes, "desc", { unmapped_type: "keyword" }),
+    createFieldSort(borderColor, "desc", { unmapped_type: "keyword" }),
+    createFieldSort(releasedAt, "desc", { unmapped_type: "keyword" }),
+    createFieldSort(collectorNumber, "desc", { unmapped_type: "keyword" }),
   ];
 }
 
@@ -461,6 +817,14 @@ export function compileOrderedKeywordField({ fieldName, definition, operator, va
         [definition.esPath]: value,
       },
     };
+  }
+
+  if (operator === "!=") {
+    return negateCompiledClause({
+      term: {
+        [definition.esPath]: value,
+      },
+    });
   }
 
   const orderedValues = definition.order ?? [];
@@ -504,6 +868,25 @@ export function compileCollectorNumberField({ fieldName, definition, operator, v
   const numericValue = Number(value);
   if (Number.isNaN(numericValue)) {
     throw new Error(`Collector number comparisons require a numeric value. Received "${value}".`);
+  }
+
+  if (operator === "!=") {
+    return {
+      script: {
+        script: {
+          lang: "painless",
+          source: [
+            `if (doc['${definition.esPath}'].size() == 0) return false;`,
+            `String collectorNumber = doc['${definition.esPath}'].value;`,
+            "if (!/^[0-9]+$/.matcher(collectorNumber).matches()) return false;",
+            "return Integer.parseInt(collectorNumber) != params.value;",
+          ].join(" "),
+          params: {
+            value: numericValue,
+          },
+        },
+      },
+    };
   }
 
   return {
@@ -628,6 +1011,35 @@ function compileColorAcrossPaths(definition, builder) {
   };
 }
 
+function compileColorEqualityClause(definition, value) {
+  if (value.kind === "multicolor") {
+    return compileColorAcrossPaths(definition, (esPath) =>
+      compileColorSetDisjunction(
+        esPath,
+        enumerateColorSets().filter((colors) => colors.length >= 2)
+      )
+    );
+  }
+
+  const targetColors = value.colors;
+
+  if (!targetColors.length) {
+    const paths = resolveColorPaths(definition);
+
+    if (paths.length === 1) {
+      return compileColorlessField(paths[0]);
+    }
+
+    return {
+      bool: {
+        must: paths.map((esPath) => compileColorlessField(esPath)),
+      },
+    };
+  }
+
+  return compileColorAcrossPaths(definition, (esPath) => compileExactColorSet(esPath, targetColors));
+}
+
 function parseColorValueToken(rawValue) {
   const normalized = String(rawValue).trim().toLowerCase();
   const aliasHit = COLOR_ALIASES[normalized];
@@ -662,6 +1074,10 @@ export function parseColorExpression(rawValue) {
 export function compileColorField({ fieldName, definition, operator, value }) {
   const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
   assertSupportedOperator(fieldName, supportedOperators, operator);
+
+  if (operator === "!=") {
+    return negateCompiledClause(compileColorEqualityClause(definition, value));
+  }
 
   if (value.kind === "multicolor") {
     if (operator !== ":" && operator !== "=") {
@@ -700,7 +1116,7 @@ export function compileColorField({ fieldName, definition, operator, value }) {
   }
 
   if (operator === ":" || operator === "=") {
-    return compileColorAcrossPaths(definition, (esPath) => compileExactColorSet(esPath, targetColors));
+    return compileColorEqualityClause(definition, value);
   }
 
   if (operator === ">=") {

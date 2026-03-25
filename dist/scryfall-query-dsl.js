@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.1.0+4067f2d | built 2026-03-20T10:35:27.910Z */
+/* scryfall-query-dsl v0.2.0-rc.1+256757a | built 2026-03-25T13:55:13.366Z */
 var ScryfallQueryDSL = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -28,8 +28,10 @@ var ScryfallQueryDSL = (() => {
     compileBooleanField: () => compileBooleanField,
     compileCollectorNumberField: () => compileCollectorNumberField,
     compileColorField: () => compileColorField,
+    compileDateField: () => compileDateField,
     compileIsShortcutField: () => compileIsShortcutField,
     compileKeywordField: () => compileKeywordField,
+    compileLegalityField: () => compileLegalityField,
     compileNotShortcutField: () => compileNotShortcutField,
     compileNumericField: () => compileNumericField,
     compileOrderedKeywordField: () => compileOrderedKeywordField,
@@ -39,6 +41,7 @@ var ScryfallQueryDSL = (() => {
     compileSearchPreferField: () => compileSearchPreferField,
     compileSearchUniqueField: () => compileSearchUniqueField,
     compileTextField: () => compileTextField,
+    compileYearField: () => compileYearField,
     createEngine: () => createEngine,
     parseColorExpression: () => parseColorExpression
   });
@@ -155,6 +158,108 @@ var ScryfallQueryDSL = (() => {
       }
     };
   }
+  function negateCompiledClause(clause) {
+    return {
+      bool: {
+        must_not: [clause]
+      }
+    };
+  }
+  function createMatchClause(fieldPath, value, options = {}) {
+    if (!Object.keys(options).length) {
+      return {
+        match: {
+          [fieldPath]: value
+        }
+      };
+    }
+    return {
+      match: {
+        [fieldPath]: {
+          query: value,
+          ...options
+        }
+      }
+    };
+  }
+  function createPartialPathVariants(basePath, subfields = []) {
+    if (!Array.isArray(subfields) || !subfields.length) {
+      return [basePath];
+    }
+    return [basePath, ...subfields.map((subfield) => `${basePath}.${subfield}`)];
+  }
+  function compileNameTextField({ definition, value, node }) {
+    const basePath = definition.esPath;
+    const exactEsPaths = Array.isArray(definition.exactEsPaths) && definition.exactEsPaths.length ? definition.exactEsPaths : [`${basePath}.keyword`];
+    const hasWhitespace = /\s/.test(value);
+    const operator = hasWhitespace ? "and" : void 0;
+    const shortestTokenLength = value.trim().split(/\s+/).reduce((shortest, token) => Math.min(shortest, token.length), Infinity);
+    const fuzzyPrefixLength = Number.isFinite(shortestTokenLength) ? Math.min(3, Math.max(1, shortestTokenLength)) : 1;
+    const fuzzyOptions = {
+      fuzziness: "AUTO",
+      prefix_length: fuzzyPrefixLength,
+      ...operator ? { operator } : {},
+      boost: 1
+    };
+    if (node?.exactNameBang) {
+      const terms = exactEsPaths.map((esPath) => ({
+        term: {
+          [esPath]: value
+        }
+      }));
+      return compilePathDisjunction(terms);
+    }
+    if (node?.quoted) {
+      return {
+        match_phrase: {
+          [basePath]: value
+        }
+      };
+    }
+    return {
+      bool: {
+        should: [
+          createMatchClause(basePath, value, {
+            ...operator ? { operator } : {},
+            boost: 4
+          }),
+          createMatchClause(`${basePath}.prefix`, value, {
+            ...operator ? { operator } : {},
+            boost: 3
+          }),
+          createMatchClause(`${basePath}.infix`, value, {
+            ...operator ? { operator } : {},
+            boost: 2
+          }),
+          createMatchClause(basePath, value, fuzzyOptions)
+        ],
+        minimum_should_match: 1
+      }
+    };
+  }
+  function compileDateComparisonClause(esPath, operator, value) {
+    if (operator === ":" || operator === "=") {
+      return {
+        term: {
+          [esPath]: value
+        }
+      };
+    }
+    return {
+      range: {
+        [esPath]: {
+          [RANGE_OPERATOR_MAP[operator]]: value
+        }
+      }
+    };
+  }
+  function compilePartialTextField({ definition, value }) {
+    const esPaths = Array.isArray(definition.esPaths) && definition.esPaths.length ? definition.esPaths : [definition.esPath];
+    const subfields = definition.partialSubfields ?? ["prefix", "infix"];
+    const pathVariants = esPaths.flatMap((path) => createPartialPathVariants(path, subfields));
+    const clauses = pathVariants.map((path) => createMatchClause(path, value));
+    return compilePathDisjunction(clauses);
+  }
   function compileNumericField({ fieldName, definition, operator, value }) {
     const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
     assertSupportedOperator(fieldName, supportedOperators, operator);
@@ -164,6 +269,13 @@ var ScryfallQueryDSL = (() => {
           [definition.esPath]: value
         }
       };
+    }
+    if (operator === "!=") {
+      return negateCompiledClause({
+        term: {
+          [definition.esPath]: value
+        }
+      });
     }
     return {
       range: {
@@ -182,30 +294,22 @@ var ScryfallQueryDSL = (() => {
         [esPath]: value
       }
     }));
+    if (operator === "!=") {
+      return negateCompiledClause(compilePathDisjunction(terms));
+    }
     return compilePathDisjunction(terms);
   }
   function compileTextField({ fieldName, definition, operator, value, node }) {
     const supportedOperators = definition.operators ?? [":", "="];
     assertSupportedOperator(fieldName, supportedOperators, operator);
     const esPaths = Array.isArray(definition.esPaths) && definition.esPaths.length ? definition.esPaths : [definition.esPath];
-    if (fieldName === "name" && operator === ":" && typeof value === "string" && esPaths.length === 1) {
-      if (node?.quoted) {
-        return {
-          match_phrase: {
-            [definition.esPath]: value
-          }
-        };
-      }
-      if (node?.implicit && /\s/.test(value)) {
-        return {
-          match: {
-            [definition.esPath]: {
-              query: value,
-              operator: "and"
-            }
-          }
-        };
-      }
+    const normalizedFieldName = definition.name ?? fieldName;
+    if (normalizedFieldName === "name" && (operator === ":" || operator === "=") && typeof value === "string" && esPaths.length === 1) {
+      return compileNameTextField({
+        definition,
+        value,
+        node
+      });
     }
     if (operator === "=") {
       const terms = esPaths.map((esPath) => ({
@@ -215,11 +319,13 @@ var ScryfallQueryDSL = (() => {
       }));
       return compilePathDisjunction(terms);
     }
-    const matches = esPaths.map((esPath) => ({
-      match: {
-        [esPath]: value
-      }
-    }));
+    if (definition.enablePartialSubfields) {
+      return compilePartialTextField({
+        definition,
+        value
+      });
+    }
+    const matches = esPaths.map((esPath) => createMatchClause(esPath, value));
     return compilePathDisjunction(matches);
   }
   function compileBooleanField({ fieldName, definition, operator, value }) {
@@ -255,6 +361,79 @@ var ScryfallQueryDSL = (() => {
   }
   function compileSearchLangField(args) {
     return compileSearchDirectiveField({ ...args, directive: "lang" });
+  }
+  function compileLegalityField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    const legalityStatus = definition.legalityStatus ?? "legal";
+    return {
+      term: {
+        [`${definition.esPath}.${value}`]: legalityStatus
+      }
+    };
+  }
+  function compileDateField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    return compileDateComparisonClause(definition.esPath, operator, value);
+  }
+  function compileYearField({ fieldName, definition, operator, value }) {
+    const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
+    assertSupportedOperator(fieldName, supportedOperators, operator);
+    const year = Number(value);
+    if (!Number.isInteger(year)) {
+      throw new Error(`Year comparisons require an integer year value. Received "${value}".`);
+    }
+    const esPath = definition.esPath;
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    if (operator === ":" || operator === "=") {
+      return {
+        range: {
+          [esPath]: {
+            gte: yearStart,
+            lte: yearEnd
+          }
+        }
+      };
+    }
+    if (operator === ">") {
+      return {
+        range: {
+          [esPath]: {
+            gt: yearEnd
+          }
+        }
+      };
+    }
+    if (operator === ">=") {
+      return {
+        range: {
+          [esPath]: {
+            gte: yearStart
+          }
+        }
+      };
+    }
+    if (operator === "<") {
+      return {
+        range: {
+          [esPath]: {
+            lt: yearStart
+          }
+        }
+      };
+    }
+    if (operator === "<=") {
+      return {
+        range: {
+          [esPath]: {
+            lte: yearEnd
+          }
+        }
+      };
+    }
+    throw new Error(`Unsupported operator "${operator}" for field "${fieldName}".`);
   }
   function normalizeShortcutCompiledClause(clause) {
     if (!clause) {
@@ -320,10 +499,117 @@ var ScryfallQueryDSL = (() => {
       }
     };
   }
-  function compileIsShortcutField({ definition, value, node, registry }) {
+  function compileCommanderSemanticShortcut(tokenConfig) {
+    const legalityPath = tokenConfig?.legalityPath;
+    const typePaths = Array.isArray(tokenConfig?.typePaths) ? tokenConfig.typePaths : [];
+    const oraclePaths = Array.isArray(tokenConfig?.oraclePaths) ? tokenConfig.oraclePaths : [];
+    const powerPath = tokenConfig?.powerPath;
+    const toughnessPath = tokenConfig?.toughnessPath;
+    if (typeof legalityPath !== "string" || !legalityPath || !typePaths.length || !oraclePaths.length || typeof powerPath !== "string" || !powerPath || typeof toughnessPath !== "string" || !toughnessPath) {
+      throw new Error('Semantic shortcut "is:commander" is missing required path configuration.');
+    }
+    const legendaryClause = {
+      bool: {
+        should: typePaths.map(
+          (path) => createMatchClause(path, "legendary", {
+            operator: "and"
+          })
+        ),
+        minimum_should_match: 1
+      }
+    };
+    const artifactOrCreatureClause = {
+      bool: {
+        should: [
+          ...typePaths.map(
+            (path) => createMatchClause(path, "artifact", {
+              operator: "and"
+            })
+          ),
+          ...typePaths.map(
+            (path) => createMatchClause(path, "creature", {
+              operator: "and"
+            })
+          )
+        ],
+        minimum_should_match: 1
+      }
+    };
+    const textExceptionClause = {
+      bool: {
+        should: oraclePaths.map((path) => ({
+          match_phrase: {
+            [path]: "can be your commander"
+          }
+        })),
+        minimum_should_match: 1
+      }
+    };
+    return {
+      bool: {
+        should: [
+          {
+            bool: {
+              must: [
+                {
+                  bool: {
+                    must_not: [
+                      {
+                        term: {
+                          [legalityPath]: "banned"
+                        }
+                      }
+                    ]
+                  }
+                },
+                legendaryClause,
+                artifactOrCreatureClause,
+                { exists: { field: powerPath } },
+                { exists: { field: toughnessPath } }
+              ]
+            }
+          },
+          textExceptionClause
+        ],
+        minimum_should_match: 1
+      }
+    };
+  }
+  function compileIsSemanticShortcut({ definition, token, term }) {
+    const semanticConfig = definition.semanticShortcuts?.[token];
+    if (!semanticConfig) {
+      return null;
+    }
+    if (semanticConfig.kind !== "commander") {
+      throw new Error(`Unsupported semantic shortcut kind "${semanticConfig.kind}" for token "${token}".`);
+    }
+    return {
+      __sqdsl_clause: compileCommanderSemanticShortcut(semanticConfig),
+      __sqdsl_meta: {
+        type: "shortcut-term",
+        field: definition.name,
+        token,
+        term,
+        valid: true,
+        matchedFields: ["semantic-shortcut"],
+        semanticKind: semanticConfig.kind
+      }
+    };
+  }
+  function compileIsShortcutField({ fieldName, definition, value, node, registry }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, node?.operator ?? ":");
     const token = String(value).toLowerCase();
     const mappedFields = definition.tokenFieldMap?.[token] ?? [];
     const term = `${definition.name}:${token}`;
+    const semanticShortcut = compileIsSemanticShortcut({
+      definition,
+      token,
+      term
+    });
+    if (semanticShortcut) {
+      return semanticShortcut;
+    }
     const expansion = compileIsDefaultShortcut({
       definition,
       token,
@@ -368,7 +654,9 @@ var ScryfallQueryDSL = (() => {
       }
     };
   }
-  function compileNotShortcutField({ definition, value, node }) {
+  function compileNotShortcutField({ fieldName, definition, value, node }) {
+    const supportedOperators = definition.operators ?? [":", "="];
+    assertSupportedOperator(fieldName, supportedOperators, node?.operator ?? ":");
     const token = String(value).toLowerCase();
     const mappedFields = definition.tokenFieldMap?.[token] ?? [];
     const term = `${definition.name}:${token}`;
@@ -425,17 +713,28 @@ var ScryfallQueryDSL = (() => {
       }
     };
   }
-  function createDefaultPrintingSorts() {
+  function createDefaultPrintingSorts(fields = {}) {
+    const {
+      fullArt = "full_art",
+      promoTypes = "promo_types",
+      frameEffects = "frame_effects",
+      setType = "set_type",
+      frame = "frame",
+      finishes = "finishes",
+      borderColor = "border_color",
+      releasedAt = "released_at",
+      collectorNumber = "collector_number"
+    } = fields;
     return [
-      createFieldSort("full_art", "asc", { unmapped_type: "boolean" }),
-      createFieldSort("promo_types", "asc", { unmapped_type: "keyword", missing: "_first" }),
-      createFieldSort("frame_effects", "asc", { unmapped_type: "keyword", missing: "_first" }),
-      createFieldSort("set_type", "asc", { unmapped_type: "keyword" }),
-      createFieldSort("frame", "asc", { unmapped_type: "keyword" }),
-      createFieldSort("finishes", "desc", { unmapped_type: "keyword" }),
-      createFieldSort("border_color", "desc", { unmapped_type: "keyword" }),
-      createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
-      createFieldSort("collector_number", "desc", { unmapped_type: "keyword" })
+      createFieldSort(fullArt, "asc", { unmapped_type: "boolean" }),
+      createFieldSort(promoTypes, "asc", { unmapped_type: "keyword", missing: "_first" }),
+      createFieldSort(frameEffects, "asc", { unmapped_type: "keyword", missing: "_first" }),
+      createFieldSort(setType, "asc", { unmapped_type: "keyword" }),
+      createFieldSort(frame, "asc", { unmapped_type: "keyword" }),
+      createFieldSort(finishes, "desc", { unmapped_type: "keyword" }),
+      createFieldSort(borderColor, "desc", { unmapped_type: "keyword" }),
+      createFieldSort(releasedAt, "desc", { unmapped_type: "keyword" }),
+      createFieldSort(collectorNumber, "desc", { unmapped_type: "keyword" })
     ];
   }
   function compileOrderedKeywordField({ fieldName, definition, operator, value }) {
@@ -447,6 +746,13 @@ var ScryfallQueryDSL = (() => {
           [definition.esPath]: value
         }
       };
+    }
+    if (operator === "!=") {
+      return negateCompiledClause({
+        term: {
+          [definition.esPath]: value
+        }
+      });
     }
     const orderedValues = definition.order ?? [];
     const valueIndex = orderedValues.indexOf(value);
@@ -480,6 +786,24 @@ var ScryfallQueryDSL = (() => {
     const numericValue = Number(value);
     if (Number.isNaN(numericValue)) {
       throw new Error(`Collector number comparisons require a numeric value. Received "${value}".`);
+    }
+    if (operator === "!=") {
+      return {
+        script: {
+          script: {
+            lang: "painless",
+            source: [
+              `if (doc['${definition.esPath}'].size() == 0) return false;`,
+              `String collectorNumber = doc['${definition.esPath}'].value;`,
+              "if (!/^[0-9]+$/.matcher(collectorNumber).matches()) return false;",
+              "return Integer.parseInt(collectorNumber) != params.value;"
+            ].join(" "),
+            params: {
+              value: numericValue
+            }
+          }
+        }
+      };
     }
     return {
       script: {
@@ -583,6 +907,30 @@ var ScryfallQueryDSL = (() => {
       }
     };
   }
+  function compileColorEqualityClause(definition, value) {
+    if (value.kind === "multicolor") {
+      return compileColorAcrossPaths(
+        definition,
+        (esPath) => compileColorSetDisjunction(
+          esPath,
+          enumerateColorSets().filter((colors) => colors.length >= 2)
+        )
+      );
+    }
+    const targetColors = value.colors;
+    if (!targetColors.length) {
+      const paths = resolveColorPaths(definition);
+      if (paths.length === 1) {
+        return compileColorlessField(paths[0]);
+      }
+      return {
+        bool: {
+          must: paths.map((esPath) => compileColorlessField(esPath))
+        }
+      };
+    }
+    return compileColorAcrossPaths(definition, (esPath) => compileExactColorSet(esPath, targetColors));
+  }
   function parseColorValueToken(rawValue) {
     const normalized = String(rawValue).trim().toLowerCase();
     const aliasHit = COLOR_ALIASES[normalized];
@@ -611,6 +959,9 @@ var ScryfallQueryDSL = (() => {
   function compileColorField({ fieldName, definition, operator, value }) {
     const supportedOperators = definition.operators ?? [":", "=", ">", ">=", "<", "<="];
     assertSupportedOperator(fieldName, supportedOperators, operator);
+    if (operator === "!=") {
+      return negateCompiledClause(compileColorEqualityClause(definition, value));
+    }
     if (value.kind === "multicolor") {
       if (operator !== ":" && operator !== "=") {
         throw new Error(`Field "${fieldName}" does not support operator "${operator}" for multicolor.`);
@@ -642,7 +993,7 @@ var ScryfallQueryDSL = (() => {
       }
     }
     if (operator === ":" || operator === "=") {
-      return compileColorAcrossPaths(definition, (esPath) => compileExactColorSet(esPath, targetColors));
+      return compileColorEqualityClause(definition, value);
     }
     if (operator === ">=") {
       return compileColorAcrossPaths(definition, (esPath) => ({
@@ -697,6 +1048,125 @@ var ScryfallQueryDSL = (() => {
       );
     }
     throw new Error(`Unsupported operator "${operator}" for field "${fieldName}".`);
+  }
+
+  // src/compiler/control-config.js
+  function assertPrefix(prefix) {
+    if (typeof prefix !== "string" || !prefix.trim()) {
+      throw new Error("Control-config prefix must be a non-empty string.");
+    }
+  }
+  function prefixPath(path, prefix) {
+    return `${prefix}.${path}`;
+  }
+  var DEFAULT_CONTROL_CONFIG = {
+    collapseFields: {
+      cards: "oracle_id",
+      art: "illustration_id"
+    },
+    orderFields: {
+      cmc: "cmc",
+      power: "power_num",
+      toughness: "toughness_num",
+      set: "set",
+      name: "name.keyword",
+      usd: "prices.usd",
+      eur: "prices.eur",
+      tix: "prices.tix",
+      edhrec: "edhrec_rank",
+      released: "released_at"
+    },
+    orderScriptFields: {
+      rarity: "rarity",
+      colors: "colors"
+    },
+    langField: "lang",
+    prefer: {
+      defaultPrintingSortFields: {
+        fullArt: "full_art",
+        promoTypes: "promo_types",
+        frameEffects: "frame_effects",
+        setType: "set_type",
+        frame: "frame",
+        finishes: "finishes",
+        borderColor: "border_color",
+        releasedAt: "released_at",
+        collectorNumber: "collector_number"
+      },
+      oldestFields: {
+        releasedAt: "released_at",
+        collectorNumber: "collector_number"
+      },
+      newestFields: {
+        releasedAt: "released_at",
+        collectorNumber: "collector_number"
+      },
+      usdField: "prices.usd",
+      promoField: "promo",
+      universesBeyondField: "universes_beyond",
+      atypicalFields: {
+        promo: "promo",
+        frameEffect: "frame_effect",
+        fullArt: "full_art",
+        oversized: "oversized"
+      }
+    }
+  };
+  function createPrefixedControlConfig(prefix, baseConfig = DEFAULT_CONTROL_CONFIG) {
+    assertPrefix(prefix);
+    return {
+      collapseFields: {
+        cards: prefixPath(baseConfig.collapseFields.cards, prefix),
+        art: prefixPath(baseConfig.collapseFields.art, prefix)
+      },
+      orderFields: {
+        cmc: prefixPath(baseConfig.orderFields.cmc, prefix),
+        power: prefixPath(baseConfig.orderFields.power, prefix),
+        toughness: prefixPath(baseConfig.orderFields.toughness, prefix),
+        set: prefixPath(baseConfig.orderFields.set, prefix),
+        name: prefixPath(baseConfig.orderFields.name, prefix),
+        usd: prefixPath(baseConfig.orderFields.usd, prefix),
+        eur: prefixPath(baseConfig.orderFields.eur, prefix),
+        tix: prefixPath(baseConfig.orderFields.tix, prefix),
+        edhrec: prefixPath(baseConfig.orderFields.edhrec, prefix),
+        released: prefixPath(baseConfig.orderFields.released, prefix)
+      },
+      orderScriptFields: {
+        rarity: prefixPath(baseConfig.orderScriptFields.rarity, prefix),
+        colors: prefixPath(baseConfig.orderScriptFields.colors, prefix)
+      },
+      langField: prefixPath(baseConfig.langField, prefix),
+      prefer: {
+        defaultPrintingSortFields: {
+          fullArt: prefixPath(baseConfig.prefer.defaultPrintingSortFields.fullArt, prefix),
+          promoTypes: prefixPath(baseConfig.prefer.defaultPrintingSortFields.promoTypes, prefix),
+          frameEffects: prefixPath(baseConfig.prefer.defaultPrintingSortFields.frameEffects, prefix),
+          setType: prefixPath(baseConfig.prefer.defaultPrintingSortFields.setType, prefix),
+          frame: prefixPath(baseConfig.prefer.defaultPrintingSortFields.frame, prefix),
+          finishes: prefixPath(baseConfig.prefer.defaultPrintingSortFields.finishes, prefix),
+          borderColor: prefixPath(baseConfig.prefer.defaultPrintingSortFields.borderColor, prefix),
+          releasedAt: prefixPath(baseConfig.prefer.defaultPrintingSortFields.releasedAt, prefix),
+          collectorNumber: prefixPath(baseConfig.prefer.defaultPrintingSortFields.collectorNumber, prefix)
+        },
+        oldestFields: {
+          releasedAt: prefixPath(baseConfig.prefer.oldestFields.releasedAt, prefix),
+          collectorNumber: prefixPath(baseConfig.prefer.oldestFields.collectorNumber, prefix)
+        },
+        newestFields: {
+          releasedAt: prefixPath(baseConfig.prefer.newestFields.releasedAt, prefix),
+          collectorNumber: prefixPath(baseConfig.prefer.newestFields.collectorNumber, prefix)
+        },
+        usdField: prefixPath(baseConfig.prefer.usdField, prefix),
+        promoField: prefixPath(baseConfig.prefer.promoField, prefix),
+        universesBeyondField: prefixPath(baseConfig.prefer.universesBeyondField, prefix),
+        atypicalFields: {
+          promo: prefixPath(baseConfig.prefer.atypicalFields.promo, prefix),
+          frameEffect: prefixPath(baseConfig.prefer.atypicalFields.frameEffect, prefix),
+          fullArt: prefixPath(baseConfig.prefer.atypicalFields.fullArt, prefix),
+          oversized: prefixPath(baseConfig.prefer.atypicalFields.oversized, prefix)
+        }
+      }
+    };
   }
 
   // src/compiler/index.js
@@ -790,31 +1260,59 @@ var ScryfallQueryDSL = (() => {
     }
     return result;
   }
-  function buildOrderSorts(order, direction) {
+  function resolveControlPath(path, context) {
+    if (typeof path !== "string" || !path) {
+      throw new Error(`Compiler control configuration missing "${context}".`);
+    }
+    return path;
+  }
+  function buildOrderSorts(order, direction, controlConfig) {
     const normalizedDirection = direction ?? "asc";
+    const orderFields = controlConfig.orderFields ?? {};
+    const orderScriptFields = controlConfig.orderScriptFields ?? {};
     if (order === "cmc") {
-      return [createFieldSort("cmc", normalizedDirection, { unmapped_type: "double" })];
+      return [createFieldSort(resolveControlPath(orderFields.cmc, "orderFields.cmc"), normalizedDirection, { unmapped_type: "double" })];
     }
     if (order === "power") {
-      return [createFieldSort("power", normalizedDirection, { unmapped_type: "keyword" })];
+      return [
+        createFieldSort(resolveControlPath(orderFields.power, "orderFields.power"), normalizedDirection, {
+          unmapped_type: "double"
+        })
+      ];
     }
     if (order === "toughness") {
-      return [createFieldSort("toughness", normalizedDirection, { unmapped_type: "keyword" })];
+      return [
+        createFieldSort(resolveControlPath(orderFields.toughness, "orderFields.toughness"), normalizedDirection, {
+          unmapped_type: "double"
+        })
+      ];
     }
     if (order === "set") {
-      return [createFieldSort("set", normalizedDirection, { unmapped_type: "keyword" })];
+      return [createFieldSort(resolveControlPath(orderFields.set, "orderFields.set"), normalizedDirection, { unmapped_type: "keyword" })];
     }
     if (order === "name") {
-      return [createFieldSort("name.keyword", normalizedDirection, { unmapped_type: "keyword" })];
+      return [createFieldSort(resolveControlPath(orderFields.name, "orderFields.name"), normalizedDirection, { unmapped_type: "keyword" })];
     }
     if (order === "usd" || order === "eur" || order === "tix") {
-      return [createFieldSort(`prices.${order}`, normalizedDirection, { unmapped_type: "double" })];
+      return [
+        createFieldSort(resolveControlPath(orderFields[order], `orderFields.${order}`), normalizedDirection, {
+          unmapped_type: "double"
+        })
+      ];
     }
     if (order === "edhrec") {
-      return [createFieldSort("edhrec_rank", normalizedDirection, { unmapped_type: "long" })];
+      return [
+        createFieldSort(resolveControlPath(orderFields.edhrec, "orderFields.edhrec"), normalizedDirection, {
+          unmapped_type: "long"
+        })
+      ];
     }
     if (order === "released") {
-      return [createFieldSort("released_at", normalizedDirection, { unmapped_type: "keyword" })];
+      return [
+        createFieldSort(resolveControlPath(orderFields.released, "orderFields.released"), normalizedDirection, {
+          unmapped_type: "keyword"
+        })
+      ];
     }
     if (order === "rarity") {
       return [
@@ -827,7 +1325,7 @@ var ScryfallQueryDSL = (() => {
           return params.ranks.containsKey(rarity) ? params.ranks.get(rarity) : params.fallback;
         `,
           {
-            field: "rarity",
+            field: resolveControlPath(orderScriptFields.rarity, "orderScriptFields.rarity"),
             fallback: 999,
             ranks: RARITY_RANKS
           },
@@ -842,7 +1340,7 @@ var ScryfallQueryDSL = (() => {
           return doc.containsKey(params.field) && !doc[params.field].empty ? doc[params.field].size() : 0;
         `,
           {
-            field: "colors"
+            field: resolveControlPath(orderScriptFields.colors, "orderScriptFields.colors")
           },
           normalizedDirection
         )
@@ -850,73 +1348,107 @@ var ScryfallQueryDSL = (() => {
     }
     throw new Error(`Unknown order expression "${order}".`);
   }
-  function buildPreferSorts(prefer) {
+  function buildPreferSorts(prefer, controlConfig) {
+    const preferConfig = controlConfig.prefer ?? {};
     if (prefer === "default") {
-      return createDefaultPrintingSorts();
+      return createDefaultPrintingSorts(preferConfig.defaultPrintingSortFields);
     }
     if (prefer === "oldest") {
+      const oldestFields = preferConfig.oldestFields ?? {};
       return [
-        createFieldSort("released_at", "asc", { unmapped_type: "keyword" }),
-        createFieldSort("collector_number", "asc", { unmapped_type: "keyword" })
+        createFieldSort(resolveControlPath(oldestFields.releasedAt, "prefer.oldestFields.releasedAt"), "asc", {
+          unmapped_type: "keyword"
+        }),
+        createFieldSort(resolveControlPath(oldestFields.collectorNumber, "prefer.oldestFields.collectorNumber"), "asc", {
+          unmapped_type: "keyword"
+        })
       ];
     }
     if (prefer === "newest") {
+      const newestFields = preferConfig.newestFields ?? {};
       return [
-        createFieldSort("released_at", "desc", { unmapped_type: "keyword" }),
-        createFieldSort("collector_number", "desc", { unmapped_type: "keyword" })
+        createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+          unmapped_type: "keyword"
+        }),
+        createFieldSort(resolveControlPath(newestFields.collectorNumber, "prefer.newestFields.collectorNumber"), "desc", {
+          unmapped_type: "keyword"
+        })
       ];
     }
     if (prefer === "usd-low") {
-      return [createFieldSort("prices.usd", "asc", { unmapped_type: "double" })];
+      return [createFieldSort(resolveControlPath(preferConfig.usdField, "prefer.usdField"), "asc", { unmapped_type: "double" })];
     }
     if (prefer === "usd-high") {
-      return [createFieldSort("prices.usd", "desc", { unmapped_type: "double" })];
+      return [
+        createFieldSort(resolveControlPath(preferConfig.usdField, "prefer.usdField"), "desc", { unmapped_type: "double" })
+      ];
     }
     if (prefer === "promo") {
+      const newestFields = preferConfig.newestFields ?? {};
       return [
-        createFieldSort("promo", "desc", { unmapped_type: "boolean" }),
-        createFieldSort("released_at", "desc", { unmapped_type: "keyword" })
+        createFieldSort(resolveControlPath(preferConfig.promoField, "prefer.promoField"), "desc", {
+          unmapped_type: "boolean"
+        }),
+        createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+          unmapped_type: "keyword"
+        })
       ];
     }
     if (prefer === "ub") {
+      const newestFields = preferConfig.newestFields ?? {};
       return [
-        createFieldSort("universes_beyond", "desc", { unmapped_type: "boolean" }),
-        createFieldSort("released_at", "desc", { unmapped_type: "keyword" })
+        createFieldSort(resolveControlPath(preferConfig.universesBeyondField, "prefer.universesBeyondField"), "desc", {
+          unmapped_type: "boolean"
+        }),
+        createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+          unmapped_type: "keyword"
+        })
       ];
     }
     if (prefer === "notub") {
+      const newestFields = preferConfig.newestFields ?? {};
       return [
-        createFieldSort("universes_beyond", "asc", { unmapped_type: "boolean" }),
-        createFieldSort("released_at", "desc", { unmapped_type: "keyword" })
+        createFieldSort(resolveControlPath(preferConfig.universesBeyondField, "prefer.universesBeyondField"), "asc", {
+          unmapped_type: "boolean"
+        }),
+        createFieldSort(resolveControlPath(newestFields.releasedAt, "prefer.newestFields.releasedAt"), "desc", {
+          unmapped_type: "keyword"
+        })
       ];
     }
     if (prefer === "atypical") {
+      const atypicalFields = preferConfig.atypicalFields ?? {};
       return [
         createScriptSort(
           `
           def score = 0;
-          if (doc.containsKey('promo') && !doc['promo'].empty && doc['promo'].value) {
+          if (doc.containsKey(params.promoField) && !doc[params.promoField].empty && doc[params.promoField].value) {
             score += 8;
           }
-          if (doc.containsKey('frame_effect') && !doc['frame_effect'].empty) {
+          if (doc.containsKey(params.frameEffectField) && !doc[params.frameEffectField].empty) {
             score += 4;
           }
-          if (doc.containsKey('full_art') && !doc['full_art'].empty && doc['full_art'].value) {
+          if (doc.containsKey(params.fullArtField) && !doc[params.fullArtField].empty && doc[params.fullArtField].value) {
             score += 2;
           }
-          if (doc.containsKey('oversized') && !doc['oversized'].empty && doc['oversized'].value) {
+          if (doc.containsKey(params.oversizedField) && !doc[params.oversizedField].empty && doc[params.oversizedField].value) {
             score += 1;
           }
           return score;
         `,
-          {},
+          {
+            promoField: resolveControlPath(atypicalFields.promo, "prefer.atypicalFields.promo"),
+            frameEffectField: resolveControlPath(atypicalFields.frameEffect, "prefer.atypicalFields.frameEffect"),
+            fullArtField: resolveControlPath(atypicalFields.fullArt, "prefer.atypicalFields.fullArt"),
+            oversizedField: resolveControlPath(atypicalFields.oversized, "prefer.atypicalFields.oversized")
+          },
           "desc"
         )
       ];
     }
     throw new Error(`Unknown prefer expression "${prefer}".`);
   }
-  function buildLangSorts(lang) {
+  function buildLangSorts(lang, controlConfig) {
     return [
       createScriptSort(
         `
@@ -926,14 +1458,14 @@ var ScryfallQueryDSL = (() => {
         return doc[params.field].value == params.lang ? 0 : 1;
       `,
         {
-          field: "lang",
+          field: resolveControlPath(controlConfig.langField, "langField"),
           lang
         },
         "asc"
       )
     ];
   }
-  function applySearchControls(controls) {
+  function applySearchControls(controls, controlConfig) {
     const state = {
       unique: null,
       order: null,
@@ -955,33 +1487,34 @@ var ScryfallQueryDSL = (() => {
       }
     }
     const request = {};
+    const collapseFields = controlConfig.collapseFields ?? {};
     if (state.unique === "cards") {
       request.collapse = {
-        field: "oracle_id"
+        field: resolveControlPath(collapseFields.cards, "collapseFields.cards")
       };
     } else if (state.unique === "art") {
       request.collapse = {
-        field: "illustration_id"
+        field: resolveControlPath(collapseFields.art, "collapseFields.art")
       };
     }
     const sort = [];
     if (state.lang) {
-      sort.push(...buildLangSorts(state.lang));
+      sort.push(...buildLangSorts(state.lang, controlConfig));
     }
     if (state.order) {
-      sort.push(...buildOrderSorts(state.order, state.direction));
+      sort.push(...buildOrderSorts(state.order, state.direction, controlConfig));
     } else if (state.unique === "cards") {
-      sort.push(...buildOrderSorts("name", state.direction));
+      sort.push(...buildOrderSorts("name", state.direction, controlConfig));
     }
     if (state.prefer) {
-      sort.push(...buildPreferSorts(state.prefer));
+      sort.push(...buildPreferSorts(state.prefer, controlConfig));
     }
     if (sort.length) {
       request.sort = sort;
     }
     return request;
   }
-  function createCompiler({ registry }) {
+  function createCompiler({ registry, controlConfig = DEFAULT_CONTROL_CONFIG }) {
     function compileTerm(node) {
       const fieldDefinition = registry.getField(node.field);
       const value = registry.parseValue(node.field, node.value);
@@ -1032,7 +1565,7 @@ var ScryfallQueryDSL = (() => {
       compile(ast) {
         const compiled = compileNode(ast);
         const query = compiled.clause ?? { match_all: {} };
-        const controls = applySearchControls(compiled.controls);
+        const controls = applySearchControls(compiled.controls, controlConfig);
         const hasControls = Object.keys(controls).length > 0;
         if (!hasControls) {
           return query;
@@ -1045,7 +1578,7 @@ var ScryfallQueryDSL = (() => {
       compileWithMeta(ast) {
         const compiled = compileNode(ast);
         const query = compiled.clause ?? { match_all: {} };
-        const controls = applySearchControls(compiled.controls);
+        const controls = applySearchControls(compiled.controls, controlConfig);
         const hasControls = Object.keys(controls).length > 0;
         const dsl = hasControls ? {
           query,
@@ -1101,7 +1634,8 @@ var ScryfallQueryDSL = (() => {
   }
 
   // src/parser/index.js
-  var OPERATOR_PATTERN = /^(>=|<=|:|=|>|<)$/;
+  var OPERATOR_PATTERN = /^(!=|>=|<=|:|=|>|<)$/;
+  var FIELD_TERM_PATTERN = /^([^:><=!]+)(!=|>=|<=|:|=|>|<)(.+)$/;
   function isWhitespace(character) {
     return /\s/.test(character);
   }
@@ -1187,8 +1721,35 @@ var ScryfallQueryDSL = (() => {
     }
     return result;
   }
+  function parseExactNameBangTerm(rawTerm) {
+    const rawValue = rawTerm.slice(1);
+    if (!rawValue.length) {
+      throw new Error('Exact-name bang term is missing a value. Use !fire or !"sift through sands".');
+    }
+    const isQuoted = rawValue.startsWith('"') && rawValue.endsWith('"');
+    if (!isQuoted && FIELD_TERM_PATTERN.test(rawValue)) {
+      throw new Error(
+        `Fielded bang term "${rawTerm}" is not supported. Use bare exact-name bang syntax like !fire or !"sift through sands".`
+      );
+    }
+    const normalizedValue = isQuoted ? unescapeQuotedValue(rawValue.slice(1, -1)) : rawValue;
+    if (!normalizedValue.length) {
+      throw new Error(`Exact-name bang term "${rawTerm}" resolves to an empty value.`);
+    }
+    return {
+      field: "name",
+      operator: ":",
+      value: normalizedValue,
+      implicit: true,
+      exactNameBang: true,
+      ...isQuoted ? { quoted: true } : {}
+    };
+  }
   function parseRawTerm(rawTerm) {
-    const match = rawTerm.match(/^([^:><=]+)(>=|<=|:|=|>|<)(.+)$/);
+    if (rawTerm.startsWith("!")) {
+      return parseExactNameBangTerm(rawTerm);
+    }
+    const match = rawTerm.match(FIELD_TERM_PATTERN);
     if (!match) {
       const isQuoted2 = rawTerm.startsWith('"') && rawTerm.endsWith('"');
       return {
@@ -1214,19 +1775,6 @@ var ScryfallQueryDSL = (() => {
       value: normalizedValue,
       ...isQuoted ? { quoted: true } : {}
     };
-  }
-  function mergeImplicitBareNameTerms(clauses) {
-    const merged = [];
-    for (const clause of clauses) {
-      const previous = merged[merged.length - 1];
-      const canMerge = previous && previous.type === "term" && clause?.type === "term" && previous.field === "name" && clause.field === "name" && previous.operator === ":" && clause.operator === ":" && previous.implicit && clause.implicit && !previous.negated && !clause.negated && !previous.quoted && !clause.quoted;
-      if (canMerge) {
-        previous.value = `${previous.value} ${clause.value}`;
-        continue;
-      }
-      merged.push(clause);
-    }
-    return merged;
   }
   function createParser() {
     return {
@@ -1288,11 +1836,10 @@ var ScryfallQueryDSL = (() => {
             }
             clauses.push(parseUnary());
           }
-          const normalizedClauses = mergeImplicitBareNameTerms(clauses);
-          if (normalizedClauses.length === 1) {
-            return normalizedClauses[0];
+          if (clauses.length === 1) {
+            return clauses[0];
           }
-          return createBooleanNode("and", normalizedClauses);
+          return createBooleanNode("and", clauses);
         }
         function parseOrExpression() {
           const clauses = [parseAndExpression()];
@@ -1569,6 +2116,34 @@ var ScryfallQueryDSL = (() => {
   function normalizeKeywordValue(value) {
     return String(value).trim().toLowerCase();
   }
+  function parseNonEmptyKeywordValue(value) {
+    const normalized = normalizeKeywordValue(value);
+    if (!normalized.length) {
+      throw new Error("Value must be a non-empty string.");
+    }
+    return normalized;
+  }
+  function parseDateValue(value) {
+    const normalized = String(value).trim();
+    const datePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+    const match = normalized.match(datePattern);
+    if (!match) {
+      throw new Error(`Invalid date value "${value}". Expected YYYY-MM-DD.`);
+    }
+    const [, year, month, day] = match;
+    const parsedDate = /* @__PURE__ */ new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+    if (Number.isNaN(parsedDate.getTime()) || parsedDate.getUTCFullYear() !== Number(year) || parsedDate.getUTCMonth() + 1 !== Number(month) || parsedDate.getUTCDate() !== Number(day)) {
+      throw new Error(`Invalid date value "${value}". Expected a real calendar date in YYYY-MM-DD format.`);
+    }
+    return normalized;
+  }
+  function parseYearValue(value) {
+    const normalized = String(value).trim();
+    if (!/^\d{4}$/.test(normalized)) {
+      throw new Error(`Invalid year value "${value}". Expected a 4-digit year.`);
+    }
+    return Number(normalized);
+  }
   var RARITY_ORDER = ["common", "uncommon", "rare", "mythic", "special", "bonus"];
   var RARITY_ALIASES = {
     c: "common",
@@ -1669,6 +2244,7 @@ var ScryfallQueryDSL = (() => {
         aliases: ["c", "color"],
         esPath: "colors",
         esPaths: ["colors", "card_faces.colors"],
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "color-set",
         parseValue: parseColorExpression,
         compile: compileColorField
@@ -1676,6 +2252,7 @@ var ScryfallQueryDSL = (() => {
       color_identity: {
         aliases: ["id", "identity"],
         esPath: "color_identity",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "color-set",
         parseValue: parseColorExpression,
         compile: compileColorField
@@ -1683,6 +2260,7 @@ var ScryfallQueryDSL = (() => {
       mana_value: {
         aliases: ["mv", "cmc"],
         esPath: "cmc",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "number",
         parseValue: parseNumberValue,
         compile: compileNumericField
@@ -1690,17 +2268,29 @@ var ScryfallQueryDSL = (() => {
       is: {
         aliases: ["is"],
         esPath: "is",
+        operators: [":", "="],
         type: "keyword",
         parseValue: parseShortcutValue,
         compile: compileIsShortcutField,
         tokenFieldMap: isNotTokenFieldMap,
         tokenExpansions: {
           default: IS_DEFAULT_ATOMS
+        },
+        semanticShortcuts: {
+          commander: {
+            kind: "commander",
+            legalityPath: "legalities.commander",
+            typePaths: ["type_line", "card_faces.type_line"],
+            oraclePaths: ["oracle_text", "card_faces.oracle_text"],
+            powerPath: "power",
+            toughnessPath: "toughness"
+          }
         }
       },
       not: {
         aliases: ["not"],
         esPath: "not",
+        operators: [":", "="],
         type: "keyword",
         parseValue: parseShortcutValue,
         compile: compileNotShortcutField,
@@ -1709,6 +2299,7 @@ var ScryfallQueryDSL = (() => {
       unique: {
         aliases: ["unique"],
         searchControl: true,
+        operators: [":", "="],
         type: "control",
         parseValue: parseUniqueValue,
         compile: compileSearchUniqueField
@@ -1716,6 +2307,7 @@ var ScryfallQueryDSL = (() => {
       order: {
         aliases: ["order"],
         searchControl: true,
+        operators: [":", "="],
         type: "control",
         parseValue: parseOrderValue,
         compile: compileSearchOrderField
@@ -1723,6 +2315,7 @@ var ScryfallQueryDSL = (() => {
       prefer: {
         aliases: ["prefer"],
         searchControl: true,
+        operators: [":", "="],
         type: "control",
         parseValue: parsePreferValue,
         compile: compileSearchPreferField
@@ -1730,6 +2323,7 @@ var ScryfallQueryDSL = (() => {
       direction: {
         aliases: ["direction"],
         searchControl: true,
+        operators: [":", "="],
         type: "control",
         parseValue: parseDirectionValue,
         compile: compileSearchDirectionField
@@ -1737,6 +2331,7 @@ var ScryfallQueryDSL = (() => {
       lang: {
         aliases: ["language"],
         searchControl: true,
+        operators: [":", "="],
         type: "control",
         parseValue: normalizeKeywordValue,
         compile: compileSearchLangField
@@ -1744,6 +2339,7 @@ var ScryfallQueryDSL = (() => {
       rarity: {
         aliases: ["r"],
         esPath: "rarity",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "keyword",
         parseValue: parseRarityValue,
         compile: compileOrderedKeywordField,
@@ -1751,13 +2347,54 @@ var ScryfallQueryDSL = (() => {
       },
       set: {
         esPath: "set",
+        operators: [":", "="],
         type: "keyword",
         parseValue: normalizeKeywordValue,
         compile: compileKeywordField
       },
+      legal: {
+        aliases: ["f", "format"],
+        esPath: "legalities",
+        operators: [":", "="],
+        type: "keyword",
+        parseValue: parseNonEmptyKeywordValue,
+        compile: compileLegalityField,
+        legalityStatus: "legal"
+      },
+      banned: {
+        esPath: "legalities",
+        operators: [":", "="],
+        type: "keyword",
+        parseValue: parseNonEmptyKeywordValue,
+        compile: compileLegalityField,
+        legalityStatus: "not_legal"
+      },
+      restricted: {
+        esPath: "legalities",
+        operators: [":", "="],
+        type: "keyword",
+        parseValue: parseNonEmptyKeywordValue,
+        compile: compileLegalityField,
+        legalityStatus: "restricted"
+      },
+      date: {
+        esPath: "released_at",
+        operators: [":", "=", ">", ">=", "<", "<="],
+        type: "date",
+        parseValue: parseDateValue,
+        compile: compileDateField
+      },
+      year: {
+        esPath: "released_at",
+        operators: [":", "=", ">", ">=", "<", "<="],
+        type: "number",
+        parseValue: parseYearValue,
+        compile: compileYearField
+      },
       set_type: {
         aliases: ["st"],
         esPath: "set_type",
+        operators: [":", "="],
         type: "keyword",
         parseValue: normalizeKeywordValue,
         compile: compileKeywordField
@@ -1765,6 +2402,7 @@ var ScryfallQueryDSL = (() => {
       border_color: {
         aliases: ["border"],
         esPath: "border_color",
+        operators: [":", "="],
         type: "keyword",
         parseValue: normalizeKeywordValue,
         compile: compileKeywordField
@@ -1773,6 +2411,7 @@ var ScryfallQueryDSL = (() => {
         aliases: [],
         esPath: "frame",
         esPaths: ["frame", "frame_effects"],
+        operators: [":", "="],
         type: "keyword",
         parseValue: normalizeKeywordValue,
         compile: compileKeywordField
@@ -1780,24 +2419,44 @@ var ScryfallQueryDSL = (() => {
       collector_number: {
         aliases: ["cn"],
         esPath: "collector_number",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "keyword",
         parseValue: (value) => String(value).trim(),
         compile: compileCollectorNumberField
       },
       usd: {
         esPath: "prices.usd",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "number",
         parseValue: parseNumberValue,
         compile: compileNumericField
       },
       eur: {
         esPath: "prices.eur",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "number",
         parseValue: parseNumberValue,
         compile: compileNumericField
       },
       tix: {
         esPath: "prices.tix",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
+        type: "number",
+        parseValue: parseNumberValue,
+        compile: compileNumericField
+      },
+      power: {
+        aliases: ["pow"],
+        esPath: "power_num",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
+        type: "number",
+        parseValue: parseNumberValue,
+        compile: compileNumericField
+      },
+      toughness: {
+        aliases: ["tou"],
+        esPath: "toughness_num",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         type: "number",
         parseValue: parseNumberValue,
         compile: compileNumericField
@@ -1806,19 +2465,32 @@ var ScryfallQueryDSL = (() => {
         aliases: ["o", "oracle", "text"],
         esPath: "oracle_text",
         esPaths: ["oracle_text", "card_faces.oracle_text"],
+        operators: [":", "="],
         type: "text",
+        enablePartialSubfields: true,
+        compile: compileTextField
+      },
+      flavor_text: {
+        aliases: ["ft", "flavor"],
+        esPath: "flavor_text",
+        esPaths: ["flavor_text", "card_faces.flavor_text"],
+        operators: [":", "="],
+        type: "text",
+        enablePartialSubfields: true,
         compile: compileTextField
       },
       type_line: {
         aliases: ["t", "type"],
         esPath: "type_line",
         esPaths: ["type_line", "card_faces.type_line"],
+        operators: [":", "="],
         type: "text",
         compile: compileTextField
       },
       keywords: {
         aliases: ["kw", "keyword"],
         esPath: "keywords",
+        operators: [":", "="],
         type: "keyword",
         parseValue: (value) => String(value).trim(),
         compile: compileKeywordField
@@ -1826,16 +2498,110 @@ var ScryfallQueryDSL = (() => {
       name: {
         aliases: ["name", "n"],
         esPath: "name",
+        exactEsPaths: ["name.keyword", "card_faces.name.keyword"],
+        operators: [":", "="],
         type: "text",
         compile: compileTextField
       },
       is_legendary: {
         aliases: ["legendary", "is:legendary"],
         esPath: "is_legendary",
+        operators: [":", "="],
         type: "boolean",
         parseValue: parseBooleanValue,
         compile: compileBooleanField
       }
+    };
+  }
+
+  // src/profiles/ctx-card.js
+  function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === "[object Object]";
+  }
+  function cloneValue(value) {
+    if (Array.isArray(value)) {
+      return value.map((entry) => cloneValue(entry));
+    }
+    if (isPlainObject(value)) {
+      const clone = {};
+      for (const [key, nestedValue] of Object.entries(value)) {
+        clone[key] = cloneValue(nestedValue);
+      }
+      return clone;
+    }
+    return value;
+  }
+  function prefixPath2(path, prefix) {
+    if (typeof path !== "string" || !path) {
+      return path;
+    }
+    if (path.startsWith(`${prefix}.`)) {
+      return path;
+    }
+    return `${prefix}.${path}`;
+  }
+  function prefixPathList(paths, prefix) {
+    if (!Array.isArray(paths)) {
+      return paths;
+    }
+    return paths.map((path) => prefixPath2(path, prefix));
+  }
+  function prefixTokenFieldMap(tokenFieldMap, prefix) {
+    if (!isPlainObject(tokenFieldMap)) {
+      return tokenFieldMap;
+    }
+    const nextTokenFieldMap = {};
+    for (const [token, paths] of Object.entries(tokenFieldMap)) {
+      nextTokenFieldMap[token] = prefixPathList(paths, prefix);
+    }
+    return nextTokenFieldMap;
+  }
+  function prefixSemanticShortcuts(semanticShortcuts, prefix) {
+    if (!isPlainObject(semanticShortcuts)) {
+      return semanticShortcuts;
+    }
+    const nextSemanticShortcuts = {};
+    for (const [token, config] of Object.entries(semanticShortcuts)) {
+      const nextConfig = cloneValue(config);
+      nextConfig.legalityPath = prefixPath2(nextConfig.legalityPath, prefix);
+      nextConfig.typePaths = prefixPathList(nextConfig.typePaths, prefix);
+      nextConfig.oraclePaths = prefixPathList(nextConfig.oraclePaths, prefix);
+      nextConfig.powerPath = prefixPath2(nextConfig.powerPath, prefix);
+      nextConfig.toughnessPath = prefixPath2(nextConfig.toughnessPath, prefix);
+      nextSemanticShortcuts[token] = nextConfig;
+    }
+    return nextSemanticShortcuts;
+  }
+  function deriveFieldDefinitionForCtxCard(definition, prefix) {
+    const nextDefinition = cloneValue(definition);
+    if (nextDefinition.searchControl) {
+      return nextDefinition;
+    }
+    nextDefinition.esPath = prefixPath2(nextDefinition.esPath, prefix);
+    nextDefinition.esPaths = prefixPathList(nextDefinition.esPaths, prefix);
+    nextDefinition.exactEsPaths = prefixPathList(nextDefinition.exactEsPaths, prefix);
+    nextDefinition.tokenFieldMap = prefixTokenFieldMap(nextDefinition.tokenFieldMap, prefix);
+    nextDefinition.semanticShortcuts = prefixSemanticShortcuts(nextDefinition.semanticShortcuts, prefix);
+    return nextDefinition;
+  }
+  function deriveCtxCardFieldDefinitions(options = {}) {
+    const {
+      prefix = "card",
+      baseFieldDefinitions = createDefaultFieldDefinitions()
+    } = options;
+    if (typeof prefix !== "string" || !prefix.trim()) {
+      throw new Error("ctx.card field derivation requires a non-empty prefix string.");
+    }
+    const fields = {};
+    for (const [fieldName, definition] of Object.entries(baseFieldDefinitions)) {
+      fields[fieldName] = deriveFieldDefinitionForCtxCard(definition, prefix);
+    }
+    return fields;
+  }
+  function createCtxCardProfileExtension(options = {}) {
+    return {
+      override: true,
+      fields: deriveCtxCardFieldDefinitions(options)
     };
   }
 
@@ -1943,12 +2709,12 @@ var ScryfallQueryDSL = (() => {
   }
 
   // src/runtime/createEngine.js
-  function createCompilationContext(extension) {
+  function createCompilationContext({ extension, controlConfig } = {}) {
     const registry = createRegistry();
     if (extension) {
       registry.extend(extension);
     }
-    const compiler = createCompiler({ registry });
+    const compiler = createCompiler({ registry, controlConfig });
     return {
       registry,
       compiler
@@ -1957,7 +2723,14 @@ var ScryfallQueryDSL = (() => {
   function createEngine(options = {}) {
     const parser = createParser();
     const profiles = /* @__PURE__ */ new Map();
-    profiles.set("default", createCompilationContext(options.extension));
+    profiles.set("default", createCompilationContext({ extension: options.extension }));
+    profiles.set(
+      "ctx.card",
+      createCompilationContext({
+        extension: createCtxCardProfileExtension(),
+        controlConfig: createPrefixedControlConfig("card")
+      })
+    );
     function getProfileContext(profileName = "default") {
       const context = profiles.get(profileName);
       if (!context) {
@@ -1989,7 +2762,7 @@ var ScryfallQueryDSL = (() => {
         if (profiles.has(name) && !override) {
           throw new Error(`Profile "${name}" is already registered. Use override to replace it.`);
         }
-        profiles.set(name, createCompilationContext(extension));
+        profiles.set(name, createCompilationContext({ extension }));
         return this;
       },
       extendProfile(name, extension) {
@@ -2027,9 +2800,9 @@ var ScryfallQueryDSL = (() => {
   }
 
   // src/runtime/version.js
-  var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var RELEASE = true ? "0.1.0+4067f2d" : VERSION;
-  var BUILD_DATE = true ? "2026-03-20T10:35:27.910Z" : "unbundled";
+  var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
+  var RELEASE = true ? "0.2.0-rc.1+256757a" : VERSION;
+  var BUILD_DATE = true ? "2026-03-25T13:55:13.366Z" : "unbundled";
   var announced = false;
   function announceBrowserBuild() {
     if (announced || typeof window === "undefined" || typeof console?.info !== "function") {

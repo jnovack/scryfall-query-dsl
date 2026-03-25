@@ -22,6 +22,135 @@ function buildExactColorClause(path, required, excluded) {
   };
 }
 
+function buildNameLooseClause(queryText) {
+  const operator = /\s/.test(queryText) ? "and" : null;
+  const withOperator = (payload) => (operator ? { ...payload, operator } : payload);
+  const shortestTokenLength = queryText
+    .trim()
+    .split(/\s+/)
+    .reduce((shortest, token) => Math.min(shortest, token.length), Infinity);
+  const fuzzyPrefixLength = Number.isFinite(shortestTokenLength) ? Math.min(3, Math.max(1, shortestTokenLength)) : 1;
+
+  return {
+    bool: {
+      should: [
+        {
+          match: {
+            name: withOperator({
+              query: queryText,
+              boost: 4,
+            }),
+          },
+        },
+        {
+          match: {
+            "name.prefix": withOperator({
+              query: queryText,
+              boost: 3,
+            }),
+          },
+        },
+        {
+          match: {
+            "name.infix": withOperator({
+              query: queryText,
+              boost: 2,
+            }),
+          },
+        },
+        {
+          match: {
+            name: withOperator({
+              query: queryText,
+              fuzziness: "AUTO",
+              prefix_length: fuzzyPrefixLength,
+              boost: 1,
+            }),
+          },
+        },
+      ],
+      minimum_should_match: 1,
+    },
+  };
+}
+
+function buildExactNameBangClause(queryText, paths = ["name.keyword", "card_faces.name.keyword"]) {
+  return {
+    bool: {
+      should: paths.map((path) => ({
+        term: {
+          [path]: queryText,
+        },
+      })),
+      minimum_should_match: 1,
+    },
+  };
+}
+
+function buildPartialTextClause(paths, queryText) {
+  return {
+    bool: {
+      should: paths.map((path) => ({
+        match: {
+          [path]: queryText,
+        },
+      })),
+      minimum_should_match: 1,
+    },
+  };
+}
+
+function buildYearRangeClause(operator, year) {
+  if (operator === ":" || operator === "=") {
+    return {
+      range: {
+        released_at: {
+          gte: `${year}-01-01`,
+          lte: `${year}-12-31`,
+        },
+      },
+    };
+  }
+
+  if (operator === ">") {
+    return {
+      range: {
+        released_at: {
+          gt: `${year}-12-31`,
+        },
+      },
+    };
+  }
+
+  if (operator === ">=") {
+    return {
+      range: {
+        released_at: {
+          gte: `${year}-01-01`,
+        },
+      },
+    };
+  }
+
+  if (operator === "<") {
+    return {
+      range: {
+        released_at: {
+          lt: `${year}-01-01`,
+        },
+      },
+    };
+  }
+
+  return {
+    range: {
+      released_at: {
+        lte: `${year}-12-31`,
+      },
+    },
+  };
+}
+
 function compileLegalField({ fieldName, operator, value }) {
   if (operator !== ":" && operator !== "=") {
     throw new Error(`Field "${fieldName}" does not support operator "${operator}". Supported operators: :, =`);
@@ -61,6 +190,68 @@ test("parses implicit and expressions into an AST", () => {
         field: "mv",
         operator: "<=",
         value: "5",
+        negated: false,
+      },
+    ],
+  });
+});
+
+test("parses multi-word bare input as separate implicit name terms", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.parse("acad man"), {
+    type: "boolean",
+    operator: "and",
+    clauses: [
+      {
+        type: "term",
+        field: "name",
+        operator: ":",
+        value: "acad",
+        implicit: true,
+        negated: false,
+      },
+      {
+        type: "term",
+        field: "name",
+        operator: ":",
+        value: "man",
+        implicit: true,
+        negated: false,
+      },
+    ],
+  });
+});
+
+test("parses not-equals operator and coexists with exact-name bang terms", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.parse("mv!=3"), {
+    type: "term",
+    field: "mv",
+    operator: "!=",
+    value: "3",
+    negated: false,
+  });
+
+  assert.deepEqual(engine.parse("!fire mv!=3"), {
+    type: "boolean",
+    operator: "and",
+    clauses: [
+      {
+        type: "term",
+        field: "name",
+        operator: ":",
+        value: "fire",
+        implicit: true,
+        exactNameBang: true,
+        negated: false,
+      },
+      {
+        type: "term",
+        field: "mv",
+        operator: "!=",
+        value: "3",
         negated: false,
       },
     ],
@@ -125,13 +316,17 @@ test("supports or groups and negation", () => {
     bool: {
       must_not: [
         {
-          bool: {
-            should: [
-              { match: { oracle_text: "draw" } },
-              { match: { "card_faces.oracle_text": "draw" } },
+          ...buildPartialTextClause(
+            [
+              "oracle_text",
+              "oracle_text.prefix",
+              "oracle_text.infix",
+              "card_faces.oracle_text",
+              "card_faces.oracle_text.prefix",
+              "card_faces.oracle_text.infix",
             ],
-            minimum_should_match: 1,
-          },
+            "draw",
+          ),
         },
       ],
     },
@@ -343,7 +538,7 @@ test("keeps default profile behavior isolated from custom profiles", () => {
 test("tracks and validates profile registration", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.listProfiles(), ["default"]);
+  assert.deepEqual(engine.listProfiles().sort(), ["ctx.card", "default"]);
 
   engine.registerProfile("moxfield_collection", {
     fields: {
@@ -357,7 +552,7 @@ test("tracks and validates profile registration", () => {
     },
   });
 
-  assert.deepEqual(engine.listProfiles().sort(), ["default", "moxfield_collection"]);
+  assert.deepEqual(engine.listProfiles().sort(), ["ctx.card", "default", "moxfield_collection"]);
 
   assert.throws(
     () =>
@@ -578,6 +773,88 @@ test("supports set and collector number lookups", () => {
   });
 });
 
+test("supports format legality aliases plus banned and restricted semantics", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("f:modern format:legacy legal:commander banned:historic restricted:vintage"), {
+    bool: {
+      must: [
+        { term: { "legalities.modern": "legal" } },
+        { term: { "legalities.legacy": "legal" } },
+        { term: { "legalities.commander": "legal" } },
+        { term: { "legalities.historic": "not_legal" } },
+        { term: { "legalities.vintage": "restricted" } },
+      ],
+    },
+  });
+});
+
+test("supports legality equality operators as direct status checks", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("legal=modern banned=legacy restricted=vintage"), {
+    bool: {
+      must: [
+        { term: { "legalities.modern": "legal" } },
+        { term: { "legalities.legacy": "not_legal" } },
+        { term: { "legalities.vintage": "restricted" } },
+      ],
+    },
+  });
+});
+
+test("rejects unsupported operators on legality fields", () => {
+  const engine = createEngine();
+
+  assert.throws(() => engine.compile("f>modern"), /does not support operator \">\"/);
+  assert.throws(() => engine.compile("banned!=legacy"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("restricted<commander"), /does not support operator \"<\"/);
+});
+
+test("supports date and year queries against released_at", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("date>=2015-08-18 date<2020-01-01"), {
+    bool: {
+      must: [
+        { range: { released_at: { gte: "2015-08-18" } } },
+        { range: { released_at: { lt: "2020-01-01" } } },
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("year=1994 year>2001 year>=2001 year<2020 year<=2020"), {
+    bool: {
+      must: [
+        buildYearRangeClause("=", 1994),
+        buildYearRangeClause(">", 2001),
+        buildYearRangeClause(">=", 2001),
+        buildYearRangeClause("<", 2020),
+        buildYearRangeClause("<=", 2020),
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("date:2015-08-18 date=2015-08-18 year:1994"), {
+    bool: {
+      must: [
+        { term: { released_at: "2015-08-18" } },
+        { term: { released_at: "2015-08-18" } },
+        buildYearRangeClause(":", 1994),
+      ],
+    },
+  });
+});
+
+test("fails loudly on invalid date and year values", () => {
+  const engine = createEngine();
+
+  assert.throws(() => engine.compile("date:2020"), /Invalid date value/);
+  assert.throws(() => engine.compile("date:2020-13-40"), /Invalid date value/);
+  assert.throws(() => engine.compile("year:20a4"), /Invalid year value/);
+  assert.throws(() => engine.compile("year:199"), /Invalid year value/);
+});
+
 test("supports price searches", () => {
   const engine = createEngine();
 
@@ -589,6 +866,170 @@ test("supports price searches", () => {
         { range: { "prices.tix": { lt: 2 } } },
       ],
     },
+  });
+});
+
+test("supports numeric power and toughness searches via companion fields", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("pow>=3 power=1.5 tou!=2 toughness<=0.5"), {
+    bool: {
+      must: [
+        { range: { power_num: { gte: 3 } } },
+        { term: { power_num: 1.5 } },
+        { bool: { must_not: [{ term: { toughness_num: 2 } }] } },
+        { range: { toughness_num: { lte: 0.5 } } },
+      ],
+    },
+  });
+});
+
+test("fails loudly on invalid numeric power/toughness values", () => {
+  const engine = createEngine();
+
+  assert.throws(() => engine.compile("pow>abc"), /Cannot coerce "abc" into a numeric value/);
+  assert.throws(() => engine.compile("tou=+"), /Cannot coerce "\+" into a numeric value/);
+});
+
+test("supports not-equals on comparison-style fields", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("mv!=3"), {
+    bool: {
+      must_not: [
+        { term: { cmc: 3 } },
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("usd!=1.25 eur!=0.5 tix!=2"), {
+    bool: {
+      must: [
+        { bool: { must_not: [{ term: { "prices.usd": 1.25 } }] } },
+        { bool: { must_not: [{ term: { "prices.eur": 0.5 } }] } },
+        { bool: { must_not: [{ term: { "prices.tix": 2 } }] } },
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("r!=rare"), {
+    bool: {
+      must_not: [
+        { term: { rarity: "rare" } },
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("cn!=123"), {
+    script: {
+      script: {
+        lang: "painless",
+        source:
+          "if (doc['collector_number'].size() == 0) return false; String collectorNumber = doc['collector_number'].value; if (!/^[0-9]+$/.matcher(collectorNumber).matches()) return false; return Integer.parseInt(collectorNumber) != params.value;",
+        params: {
+          value: 123,
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(engine.compile("c!=mardu"), {
+    bool: {
+      must_not: [
+        engine.compile("c=mardu"),
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("id!=c"), {
+    bool: {
+      must_not: [
+        engine.compile("id=c"),
+      ],
+    },
+  });
+});
+
+test("rejects not-equals on keyword, text, control, and shortcut fields", () => {
+  const engine = createEngine();
+
+  assert.throws(() => engine.compile("set!=lea"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("st!=masterpiece"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("border!=yellow"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("frame!=future"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("kw!=Flying"), /does not support operator \"!=\"/);
+
+  assert.throws(() => engine.compile("name!=fire"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("o!=draw"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("t!=dragon"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("ft!=factory"), /does not support operator \"!=\"/);
+
+  assert.throws(() => engine.compile("order!=name"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("unique!=cards"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("prefer!=default"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("direction!=asc"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("lang!=ja"), /does not support operator \"!=\"/);
+
+  assert.throws(() => engine.compile("is!=rare"), /does not support operator \"!=\"/);
+  assert.throws(() => engine.compile("not!=showcase"), /does not support operator \"!=\"/);
+});
+
+test("supports valid mixed queries with not-equals and rejects invalid mixed keyword not-equals", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("c:red mv!=3"), {
+    bool: {
+      must: [
+        {
+          bool: {
+            should: [
+              buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
+              buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+            ],
+            minimum_should_match: 1,
+          },
+        },
+        { bool: { must_not: [{ term: { cmc: 3 } }] } },
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("r!=rare unique:cards order:name"), {
+    query: {
+      bool: {
+        must_not: [
+          { term: { rarity: "rare" } },
+        ],
+      },
+    },
+    collapse: {
+      field: "oracle_id",
+    },
+    sort: [
+      { "name.keyword": { order: "asc", unmapped_type: "keyword" } },
+    ],
+  });
+
+  assert.throws(() => engine.compile("set!=lea unique:cards"), /does not support operator \"!=\"/);
+
+  assert.deepEqual(engine.compile("pow>=3 c:red order:power"), {
+    query: {
+      bool: {
+        must: [
+          { range: { power_num: { gte: 3 } } },
+          {
+            bool: {
+              should: [
+                buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
+                buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+              ],
+              minimum_should_match: 1,
+            },
+          },
+        ],
+      },
+    },
+    sort: [{ power_num: { order: "asc", unmapped_type: "double" } }],
   });
 });
 
@@ -636,19 +1077,19 @@ test("treats bare words as name searches", () => {
   const engine = createEngine();
 
   assert.deepEqual(engine.compile("lightning"), {
-    match: { name: "lightning" },
+    ...buildNameLooseClause("lightning"),
   });
 });
 
-test("compiles multi-word bare input with match and operator=and", () => {
+test("compiles multi-word bare input as weighted name partial/fuzzy search", () => {
   const engine = createEngine();
 
   assert.deepEqual(engine.compile("lightning bolt"), {
-    match: {
-      name: {
-        query: "lightning bolt",
-        operator: "and",
-      },
+    bool: {
+      must: [
+        buildNameLooseClause("lightning"),
+        buildNameLooseClause("bolt"),
+      ],
     },
   });
 });
@@ -663,13 +1104,132 @@ test("compiles quoted name input with match_phrase", () => {
   });
 });
 
+test("compiles exact-name bang input as strict keyword disjunction", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("!fire"), buildExactNameBangClause("fire"));
+  assert.deepEqual(engine.compile('!"sift through sands"'), buildExactNameBangClause("sift through sands"));
+});
+
+test("supports negating exact-name bang terms", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("-!fire"), {
+    bool: {
+      must_not: [
+        buildExactNameBangClause("fire"),
+      ],
+    },
+  });
+});
+
+test("supports combining exact-name bang with filters and controls", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("!fire c:red"), {
+    bool: {
+      must: [
+        buildExactNameBangClause("fire"),
+        {
+          bool: {
+            should: [
+              buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
+              buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+            ],
+            minimum_should_match: 1,
+          },
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(engine.compile("!fire unique:cards order:name"), {
+    query: buildExactNameBangClause("fire"),
+    collapse: {
+      field: "oracle_id",
+    },
+    sort: [
+      { "name.keyword": { order: "asc", unmapped_type: "keyword" } },
+    ],
+  });
+});
+
+test("compiles single-word name search with fixed weighted partial/fuzzy clauses", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("factor"), {
+    ...buildNameLooseClause("factor"),
+  });
+});
+
+test("treats name= as include-style name search (not strict term equality)", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("name=jace"), buildNameLooseClause("jace"));
+  assert.deepEqual(engine.compile("n=jace"), buildNameLooseClause("jace"));
+  assert.deepEqual(engine.compile('name="Lightning Bolt"'), {
+    match_phrase: {
+      name: "Lightning Bolt",
+    },
+  });
+});
+
+test("compiles multi-word bare shorthand as name-scoped weighted clauses", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("acad man"), {
+    bool: {
+      must: [
+        buildNameLooseClause("acad"),
+        buildNameLooseClause("man"),
+      ],
+    },
+  });
+});
+
+test("compiles oracle text search with match + prefix + infix paths", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("o:factor"), {
+    ...buildPartialTextClause(
+      [
+        "oracle_text",
+        "oracle_text.prefix",
+        "oracle_text.infix",
+        "card_faces.oracle_text",
+        "card_faces.oracle_text.prefix",
+        "card_faces.oracle_text.infix",
+      ],
+      "factor"
+    ),
+  });
+});
+
+test("compiles flavor text search with match + prefix + infix paths", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("ft:factory"), {
+    ...buildPartialTextClause(
+      [
+        "flavor_text",
+        "flavor_text.prefix",
+        "flavor_text.infix",
+        "card_faces.flavor_text",
+        "card_faces.flavor_text.prefix",
+        "card_faces.flavor_text.infix",
+      ],
+      "factory"
+    ),
+  });
+});
+
 test("supports order directives", () => {
   const engine = createEngine();
 
   const fieldOrderCases = [
     ["order:cmc", "cmc", { order: "asc", unmapped_type: "double" }],
-    ["order:power", "power", { order: "asc", unmapped_type: "keyword" }],
-    ["order:toughness", "toughness", { order: "asc", unmapped_type: "keyword" }],
+    ["order:power", "power_num", { order: "asc", unmapped_type: "double" }],
+    ["order:toughness", "toughness_num", { order: "asc", unmapped_type: "double" }],
     ["order:set", "set", { order: "asc", unmapped_type: "keyword" }],
     ["order:name", "name.keyword", { order: "asc", unmapped_type: "keyword" }],
     ["order:usd", "prices.usd", { order: "asc", unmapped_type: "double" }],
@@ -822,15 +1382,69 @@ test("supports is: token cross-reference matching", () => {
   });
 });
 
+test("supports is:commander semantic shortcut without coupling generic is: to legality", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:commander"), {
+    bool: {
+      should: [
+        {
+          bool: {
+            must: [
+              {
+                bool: {
+                  must_not: [
+                    { term: { "legalities.commander": "banned" } },
+                  ],
+                },
+              },
+              {
+                bool: {
+                  should: [
+                    { match: { type_line: { query: "legendary", operator: "and" } } },
+                    { match: { "card_faces.type_line": { query: "legendary", operator: "and" } } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              {
+                bool: {
+                  should: [
+                    { match: { type_line: { query: "artifact", operator: "and" } } },
+                    { match: { "card_faces.type_line": { query: "artifact", operator: "and" } } },
+                    { match: { type_line: { query: "creature", operator: "and" } } },
+                    { match: { "card_faces.type_line": { query: "creature", operator: "and" } } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              { exists: { field: "power" } },
+              { exists: { field: "toughness" } },
+            ],
+          },
+        },
+        {
+          bool: {
+            should: [
+              { match_phrase: { oracle_text: "can be your commander" } },
+              { match_phrase: { "card_faces.oracle_text": "can be your commander" } },
+            ],
+            minimum_should_match: 1,
+          },
+        },
+      ],
+      minimum_should_match: 1,
+    },
+  });
+});
+
 test("supports not: token cross-reference matching", () => {
   const engine = createEngine();
 
   const result = engine.compile('lightning not:showcase');
 
   assert.equal(result.bool.must.length, 2);
-  assert.deepEqual(result.bool.must[0], {
-    match: { name: "lightning" },
-  });
+  assert.deepEqual(result.bool.must[0], buildNameLooseClause("lightning"));
   assert.deepEqual(result.bool.must[1], {
     bool: {
       must_not: [
@@ -955,6 +1569,15 @@ test("compileWithMeta treats is:default as a valid shortcut", () => {
   const result = engine.compileWithMeta("is:default");
 
   assert.deepEqual(result.meta.terms.valid, ["is:default"]);
+  assert.deepEqual(result.meta.terms.invalid, []);
+  assert.equal(result.meta.warnings.length, 0);
+});
+
+test("compileWithMeta treats is:commander as a valid semantic shortcut", () => {
+  const engine = createEngine();
+  const result = engine.compileWithMeta("is:commander");
+
+  assert.deepEqual(result.meta.terms.valid, ["is:commander"]);
   assert.deepEqual(result.meta.terms.invalid, []);
   assert.equal(result.meta.warnings.length, 0);
 });
@@ -1171,7 +1794,7 @@ test("combines unique:cards with not: shortcuts and directives", () => {
   });
   assert.equal(result.sort.length, 1);
   assert.equal(result.query.bool.must.length, 2);
-  assert.equal(result.query.bool.must[0].match.name, "lightning");
+  assert.deepEqual(result.query.bool.must[0], buildNameLooseClause("lightning"));
   assert.deepEqual(result.query.bool.must[1], {
     bool: {
       must_not: [
@@ -1219,21 +1842,54 @@ test("parses quoted values as a single term", () => {
   });
 });
 
+test("parses exact-name bang terms as non-merged name terms", () => {
+  const engine = createEngine();
+  const ast = engine.parse('!fire !"sift through sands"');
+
+  assert.deepEqual(ast, {
+    type: "boolean",
+    operator: "and",
+    clauses: [
+      {
+        type: "term",
+        field: "name",
+        operator: ":",
+        value: "fire",
+        implicit: true,
+        exactNameBang: true,
+        negated: false,
+      },
+      {
+        type: "term",
+        field: "name",
+        operator: ":",
+        value: "sift through sands",
+        implicit: true,
+        exactNameBang: true,
+        quoted: true,
+        negated: false,
+      },
+    ],
+  });
+});
+
 test("keeps boolean keywords literal inside quoted values", () => {
   const engine = createEngine();
 
   assert.deepEqual(engine.compile('o:"choose one or both" name:"Fire and Ice"'), {
     bool: {
       must: [
-        {
-          bool: {
-            should: [
-              { match: { oracle_text: "choose one or both" } },
-              { match: { "card_faces.oracle_text": "choose one or both" } },
-            ],
-            minimum_should_match: 1,
-          },
-        },
+        buildPartialTextClause(
+          [
+            "oracle_text",
+            "oracle_text.prefix",
+            "oracle_text.infix",
+            "card_faces.oracle_text",
+            "card_faces.oracle_text.prefix",
+            "card_faces.oracle_text.infix",
+          ],
+          "choose one or both"
+        ),
         { match_phrase: { name: "Fire and Ice" } },
       ],
     },
@@ -1244,13 +1900,17 @@ test("unescapes escaped quotes inside quoted values", () => {
   const engine = createEngine();
 
   assert.deepEqual(engine.compile('o:"Whenever a card says \\"draw\\"..."'), {
-    bool: {
-      should: [
-        { match: { oracle_text: 'Whenever a card says "draw"...' } },
-        { match: { "card_faces.oracle_text": 'Whenever a card says "draw"...' } },
+    ...buildPartialTextClause(
+      [
+        "oracle_text",
+        "oracle_text.prefix",
+        "oracle_text.infix",
+        "card_faces.oracle_text",
+        "card_faces.oracle_text.prefix",
+        "card_faces.oracle_text.infix",
       ],
-      minimum_should_match: 1,
-    },
+      'Whenever a card says "draw"...'
+    ),
   });
 });
 
@@ -1258,4 +1918,21 @@ test("fails on unterminated quoted values", () => {
   const engine = createEngine();
 
   assert.throws(() => engine.parse('name:"Lightning Bolt'), /Unterminated quoted string/);
+});
+
+test("fails on unsupported exact-name bang forms", () => {
+  const engine = createEngine();
+
+  assert.throws(
+    () => engine.parse("!name:fire"),
+    /Fielded bang term "![^"]+" is not supported/
+  );
+  assert.throws(
+    () => engine.parse("!o:draw"),
+    /Fielded bang term "![^"]+" is not supported/
+  );
+  assert.throws(
+    () => engine.parse("!"),
+    /Exact-name bang term is missing a value/
+  );
 });
