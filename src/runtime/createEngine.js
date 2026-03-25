@@ -3,6 +3,7 @@ import { createPrefixedControlConfig } from "../compiler/control-config.js";
 import { createParser } from "../parser/index.js";
 import { createCtxCardProfileExtension } from "../profiles/ctx-card.js";
 import { createRegistry } from "../registry/index.js";
+import { RELEASE } from "./version.js";
 
 function createCompilationContext({ extension, controlConfig } = {}) {
   const registry = createRegistry();
@@ -43,6 +44,7 @@ export function createEngine(options = {}) {
   }
 
   return {
+    version: RELEASE,
     parse(query) {
       return parser.parse(query);
     },

@@ -585,6 +585,13 @@ test("exports version metadata", () => {
   assert.match(RELEASE, /^0\./);
 });
 
+test("exposes engine.version metadata", () => {
+  const engine = createEngine();
+
+  assert.equal(typeof engine.version, "string");
+  assert.equal(engine.version, RELEASE);
+});
+
 test("keeps color and color identity distinct", () => {
   const engine = createEngine();
 

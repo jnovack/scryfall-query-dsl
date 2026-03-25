@@ -20,6 +20,13 @@ Built-in profiles always include:
 - `default`
 - `ctx.card`
 
+## `engine.version`
+
+Exposes the current release string for the engine instance.
+
+- type: string
+- value: same as exported `RELEASE`
+
 ## `engine.parse(query)`
 
 Parses a query string into an AST.

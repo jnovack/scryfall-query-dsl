@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.1+570231c | built 2026-03-25T15:45:27.626Z */
+/* scryfall-query-dsl v0.2.0-rc.1+2a81785 | built 2026-03-25T16:14:51.697Z */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -2708,6 +2708,19 @@ function createRegistry() {
   };
 }
 
+// src/runtime/version.js
+var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
+var RELEASE = true ? "0.2.0-rc.1+2a81785" : VERSION;
+var BUILD_DATE = true ? "2026-03-25T16:14:51.697Z" : "unbundled";
+var announced = false;
+function announceBrowserBuild() {
+  if (announced || typeof window === "undefined" || typeof console?.info !== "function") {
+    return;
+  }
+  announced = true;
+  console.info(`[ScryfallQueryDSL] loaded ${RELEASE}`);
+}
+
 // src/runtime/createEngine.js
 function createCompilationContext({ extension, controlConfig } = {}) {
   const registry = createRegistry();
@@ -2739,6 +2752,7 @@ function createEngine(options = {}) {
     return context;
   }
   return {
+    version: RELEASE,
     parse(query) {
       return parser.parse(query);
     },
@@ -2797,19 +2811,6 @@ function createEngine(options = {}) {
       return context.registry.resolveFieldName(nameOrAlias);
     }
   };
-}
-
-// src/runtime/version.js
-var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
-var RELEASE = true ? "0.2.0-rc.1+570231c" : VERSION;
-var BUILD_DATE = true ? "2026-03-25T15:45:27.626Z" : "unbundled";
-var announced = false;
-function announceBrowserBuild() {
-  if (announced || typeof window === "undefined" || typeof console?.info !== "function") {
-    return;
-  }
-  announced = true;
-  console.info(`[ScryfallQueryDSL] loaded ${RELEASE}`);
 }
 
 // src/index.js
