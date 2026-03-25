@@ -84,7 +84,7 @@ These features are implemented in the parser and compiler today.
 | Prices | Fully supported | `usd`, `eur`, and `tix` compile as numeric price fields using the configured `prices.*` paths. | `usd<=0.50`, `eur>1.00`, `tix:2.5` |
 | Power/Toughness numeric fields | Fully supported | `pow` / `power` and `tou` / `toughness` compile as numeric comparisons against `power_num` / `toughness_num`. | `pow>=3`, `power=1.5`, `tou!=2`, `toughness<=0.5` |
 | Keywords | Fully supported | `kw`, `keyword`, and `keywords` compile as exact keyword matches against `keywords`. | `kw:Flying`, `keywords:Defender` |
-| Unique result modes | Fully supported | `unique:cards` collapses on `oracle_id`, `unique:art` collapses on `illustration_id`, and `unique:prints` leaves print-level results unchanged. | `unique:cards`, `unique:art`, `unique:prints` |
+| Unique result modes | Fully supported | `unique:cards` collapses on `oracle_id`, `unique:art` collapses on `illustration_id`, and `unique:prints` leaves print-level results unchanged. When collapse is active, the compiler also emits `aggs.collapsed_total` as a `cardinality` aggregation on the same field so collapsed totals can be displayed in clients. | `unique:cards`, `unique:art`, `unique:prints` |
 | Implicit sort for `unique:cards` | Fully supported | If `unique:cards` is present without an explicit `order:`, the compiler applies `order:name` ascending to keep card-level results deterministic. | `lightning unique:cards`, `not:showcase unique:cards` |
 | Primary sort order | Fully supported | `order:` sets the primary sort field and supports `cmc`, `power`, `toughness`, `set`, `name`, `usd`, `eur`, `tix`, `rarity`, `color`, `released`, and `edhrec`. | `order:cmc`, `order:rarity`, `order:edhrec` |
 | Sort direction | Fully supported | `direction:` applies `asc` or `desc` to the active order. | `direction:asc`, `direction:desc` |
@@ -102,7 +102,7 @@ These syntax areas are present in some form, but they do not currently match Scr
 | --- | --- | --- | --- |
 | Card text | Partial | `o`, `oracle`, and `text` compile as a `bool.should` disjunction of `match` clauses across `oracle_text`, `oracle_text.prefix`, `oracle_text.infix`, `card_faces.oracle_text`, `card_faces.oracle_text.prefix`, and `card_faces.oracle_text.infix`. `ft` / `flavor` follows the same pattern on `flavor_text` and `card_faces.flavor_text`. Quoted string values are parsed correctly. | No `~` substitution, `fo:`, regex, or exact Scryfall tokenization semantics. |
 | Card types | Partial | `t` and `type` compile as a `bool.should` disjunction of `match` clauses across `type_line` and `card_faces.type_line`. Quoted string values are parsed correctly. | No regex mode and no explicit subtype/supertype handling beyond whatever the target analyzer does. |
-| Name searches | Partial | `name` and `n` compile to a weighted `bool.should` disjunction (`name`, `name.prefix`, `name.infix`, fuzzy `name` with stricter prefix lock); `name=` uses the same include-style behavior; quoted name searches compile to `match_phrase`; bare terms use the same weighted name behavior and adjacent bare terms stay separate under implicit `AND`; bare bang exact-name syntax (`!fire`) compiles to strict `term` disjunction over `name.keyword` and `card_faces.name.keyword`. | No regex mode and no fielded bang forms (`!name:...`, `!o:...`). |
+| Name searches | Partial | `name` and `n` compile to a weighted `bool.should` disjunction (`name`, `name.prefix`, `name.infix`); `name=` uses the same include-style behavior; quoted name searches compile to `match_phrase`; bare terms use the same weighted name behavior and adjacent bare terms stay separate under implicit `AND`; bare bang exact-name syntax (`!fire`) compiles to strict `term` disjunction over `name.keyword` and `card_faces.name.keyword`. | No regex mode and no fielded bang forms (`!name:...`, `!o:...`). |
 | Mana value | Partial | `mv` and `cmc` support numeric range, equality, and `!=` comparisons. | No support for `manavalue:odd`, `manavalue:even`, or alternate Scryfall mana-value semantics beyond numeric comparison. |
 | Shortcut parity vs Scryfall | Partial | `is:` and `not:` are implemented as token cross-references plus explicit semantic handling for `is:default` and `is:commander`, but they still do not cover every Scryfall shortcut family. | `is:dual`, `is:fetchland`, `not:reprint` |
 
@@ -190,7 +190,7 @@ These are the most important behavior differences even within superficially simi
    Exact `cn:` and `cn=` accept any collector number string, but comparison operators only behave numerically for collector numbers that are purely digits.
 
 10. `unique`, `order`, `prefer`, `direction`, and `lang` compile into search-body controls, not filter clauses.
-   They are intentionally removed from the boolean query tree and applied as top-level `collapse` and `sort` settings, so `compile()` returns a search body when they are present.
+   They are intentionally removed from the boolean query tree and applied as top-level `collapse`, `sort`, and (when collapse is active) `aggs.collapsed_total` settings, so `compile()` returns a search body when they are present.
 
 11. `lang:` is currently a ranking preference, not an inclusion filter.
    Matching language prints are sorted ahead of others; non-matching languages are still returned.
@@ -255,6 +255,7 @@ Built-in profiles:
 - `ctx.card` (same built-ins + controls remapped to `card.*`)
 
 When search directives are present, `compile()` returns a search body with `query` plus `collapse` and/or `sort` settings instead of a plain query clause.
+When `collapse` is active (`unique:cards` / `unique:art`), `aggs.collapsed_total` is emitted as a matching-field `cardinality` aggregation.
 `unique:cards` applies an implicit ascending `name` sort when no explicit `order:` is supplied.
 `lang:xx` ranks matching `lang` values first via sort without filtering out non-matching language prints.
 
@@ -268,7 +269,7 @@ When search directives are present, `compile()` returns a search body with `quer
 Name-specific behavior:
 
 - quoted name input compiles to `match_phrase` (for example `"lightning bolt"` or `name:"Lightning Bolt"`)
-- unquoted `name` and bare-term input compile to a weighted `bool.should` over `name`, `name.prefix`, `name.infix`, and fuzzy `name` (`prefix_length` capped at `3` based on shortest token length)
+- unquoted `name` and bare-term input compile to a weighted `bool.should` over `name`, `name.prefix`, and `name.infix`
 - adjacent unquoted bare terms remain separate terms and compile as implicit `AND` (for example `lightning bolt` => `name:lightning` AND `name:bolt`)
 - `name=` and `n=` use the same include-style weighted name behavior (for example `name=jace`)
 - exact-name bang input compiles to strict `term` disjunction over `name.keyword` and `card_faces.name.keyword`

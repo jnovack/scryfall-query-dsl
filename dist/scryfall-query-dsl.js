@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.1+256757a | built 2026-03-25T13:55:13.366Z */
+/* scryfall-query-dsl v0.2.0-rc.1+570231c | built 2026-03-25T15:45:27.626Z */
 var ScryfallQueryDSL = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -193,14 +193,6 @@ var ScryfallQueryDSL = (() => {
     const exactEsPaths = Array.isArray(definition.exactEsPaths) && definition.exactEsPaths.length ? definition.exactEsPaths : [`${basePath}.keyword`];
     const hasWhitespace = /\s/.test(value);
     const operator = hasWhitespace ? "and" : void 0;
-    const shortestTokenLength = value.trim().split(/\s+/).reduce((shortest, token) => Math.min(shortest, token.length), Infinity);
-    const fuzzyPrefixLength = Number.isFinite(shortestTokenLength) ? Math.min(3, Math.max(1, shortestTokenLength)) : 1;
-    const fuzzyOptions = {
-      fuzziness: "AUTO",
-      prefix_length: fuzzyPrefixLength,
-      ...operator ? { operator } : {},
-      boost: 1
-    };
     if (node?.exactNameBang) {
       const terms = exactEsPaths.map((esPath) => ({
         term: {
@@ -230,8 +222,7 @@ var ScryfallQueryDSL = (() => {
           createMatchClause(`${basePath}.infix`, value, {
             ...operator ? { operator } : {},
             boost: 2
-          }),
-          createMatchClause(basePath, value, fuzzyOptions)
+          })
         ],
         minimum_should_match: 1
       }
@@ -1495,6 +1486,15 @@ var ScryfallQueryDSL = (() => {
     } else if (state.unique === "art") {
       request.collapse = {
         field: resolveControlPath(collapseFields.art, "collapseFields.art")
+      };
+    }
+    if (request.collapse?.field) {
+      request.aggs = {
+        collapsed_total: {
+          cardinality: {
+            field: request.collapse.field
+          }
+        }
       };
     }
     const sort = [];
@@ -2801,8 +2801,8 @@ var ScryfallQueryDSL = (() => {
 
   // src/runtime/version.js
   var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
-  var RELEASE = true ? "0.2.0-rc.1+256757a" : VERSION;
-  var BUILD_DATE = true ? "2026-03-25T13:55:13.366Z" : "unbundled";
+  var RELEASE = true ? "0.2.0-rc.1+570231c" : VERSION;
+  var BUILD_DATE = true ? "2026-03-25T15:45:27.626Z" : "unbundled";
   var announced = false;
   function announceBrowserBuild() {
     if (announced || typeof window === "undefined" || typeof console?.info !== "function") {

@@ -25,11 +25,6 @@ function buildExactColorClause(path, required, excluded) {
 function buildNameLooseClause(queryText) {
   const operator = /\s/.test(queryText) ? "and" : null;
   const withOperator = (payload) => (operator ? { ...payload, operator } : payload);
-  const shortestTokenLength = queryText
-    .trim()
-    .split(/\s+/)
-    .reduce((shortest, token) => Math.min(shortest, token.length), Infinity);
-  const fuzzyPrefixLength = Number.isFinite(shortestTokenLength) ? Math.min(3, Math.max(1, shortestTokenLength)) : 1;
 
   return {
     bool: {
@@ -55,16 +50,6 @@ function buildNameLooseClause(queryText) {
             "name.infix": withOperator({
               query: queryText,
               boost: 2,
-            }),
-          },
-        },
-        {
-          match: {
-            name: withOperator({
-              query: queryText,
-              fuzziness: "AUTO",
-              prefix_length: fuzzyPrefixLength,
-              boost: 1,
             }),
           },
         },
@@ -1005,6 +990,13 @@ test("supports valid mixed queries with not-equals and rejects invalid mixed key
     collapse: {
       field: "oracle_id",
     },
+    aggs: {
+      collapsed_total: {
+        cardinality: {
+          field: "oracle_id",
+        },
+      },
+    },
     sort: [
       { "name.keyword": { order: "asc", unmapped_type: "keyword" } },
     ],
@@ -1058,6 +1050,13 @@ test("supports unique result modes", () => {
     collapse: {
       field: "oracle_id",
     },
+    aggs: {
+      collapsed_total: {
+        cardinality: {
+          field: "oracle_id",
+        },
+      },
+    },
     sort: [
       { "name.keyword": { order: "asc", unmapped_type: "keyword" } },
     ],
@@ -1067,6 +1066,13 @@ test("supports unique result modes", () => {
     query: baseQuery,
     collapse: {
       field: "illustration_id",
+    },
+    aggs: {
+      collapsed_total: {
+        cardinality: {
+          field: "illustration_id",
+        },
+      },
     },
   });
 
@@ -1147,6 +1153,13 @@ test("supports combining exact-name bang with filters and controls", () => {
     query: buildExactNameBangClause("fire"),
     collapse: {
       field: "oracle_id",
+    },
+    aggs: {
+      collapsed_total: {
+        cardinality: {
+          field: "oracle_id",
+        },
+      },
     },
     sort: [
       { "name.keyword": { order: "asc", unmapped_type: "keyword" } },
@@ -1730,6 +1743,13 @@ test("combines is:default atoms with unique/order/prefer controls", () => {
       collapse: {
         field: "oracle_id",
       },
+      aggs: {
+        collapsed_total: {
+          cardinality: {
+            field: "oracle_id",
+          },
+        },
+      },
       sort: [
         { "prices.usd": { order: "desc", unmapped_type: "double" } },
         { released_at: { order: "desc", unmapped_type: "keyword" } },
@@ -1754,6 +1774,13 @@ test("applies last control values when combining repeated controls with atoms", 
       },
       collapse: {
         field: "illustration_id",
+      },
+      aggs: {
+        collapsed_total: {
+          cardinality: {
+            field: "illustration_id",
+          },
+        },
       },
       sort: [
         { cmc: { order: "asc", unmapped_type: "double" } },
@@ -1792,6 +1819,13 @@ test("combines unique:cards with not: shortcuts and directives", () => {
   assert.deepEqual(result.collapse, {
     field: "oracle_id",
   });
+  assert.deepEqual(result.aggs, {
+    collapsed_total: {
+      cardinality: {
+        field: "oracle_id",
+      },
+    },
+  });
   assert.equal(result.sort.length, 1);
   assert.equal(result.query.bool.must.length, 2);
   assert.deepEqual(result.query.bool.must[0], buildNameLooseClause("lightning"));
@@ -1810,6 +1844,13 @@ test("combines unique:cards with prefer:default and keeps name sorting", () => {
 
   const result = engine.compile("lightning unique:cards not:showcase prefer:default");
 
+  assert.deepEqual(result.aggs, {
+    collapsed_total: {
+      cardinality: {
+        field: "oracle_id",
+      },
+    },
+  });
   assert.deepEqual(result.sort[0], { "name.keyword": { order: "asc", unmapped_type: "keyword" } });
   assert.equal(result.sort.length, 10);
 });

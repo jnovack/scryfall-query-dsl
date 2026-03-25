@@ -43,7 +43,8 @@ Options:
 Return shape:
 
 - plain query clause when no search controls are present
-- full search body (`{ query, sort?, collapse? }`) when controls like `unique`, `order`, `prefer`, `direction`, `lang` are present
+- full search body (`{ query, sort?, collapse?, aggs? }`) when controls like `unique`, `order`, `prefer`, `direction`, `lang` are present
+- when `unique:cards` or `unique:art` is active, `aggs.collapsed_total` is emitted as a `cardinality` aggregation on the collapse field
 
 ## `engine.compileWithMeta(queryOrAst, options?)`
 

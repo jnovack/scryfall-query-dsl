@@ -379,6 +379,16 @@ function applySearchControls(controls, controlConfig) {
     };
   }
 
+  if (request.collapse?.field) {
+    request.aggs = {
+      collapsed_total: {
+        cardinality: {
+          field: request.collapse.field,
+        },
+      },
+    };
+  }
+
   const sort = [];
 
   if (state.lang) {

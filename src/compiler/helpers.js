@@ -161,17 +161,6 @@ function compileNameTextField({ definition, value, node }) {
       : [`${basePath}.keyword`];
   const hasWhitespace = /\s/.test(value);
   const operator = hasWhitespace ? "and" : undefined;
-  const shortestTokenLength = value
-    .trim()
-    .split(/\s+/)
-    .reduce((shortest, token) => Math.min(shortest, token.length), Infinity);
-  const fuzzyPrefixLength = Number.isFinite(shortestTokenLength) ? Math.min(3, Math.max(1, shortestTokenLength)) : 1;
-  const fuzzyOptions = {
-    fuzziness: "AUTO",
-    prefix_length: fuzzyPrefixLength,
-    ...(operator ? { operator } : {}),
-    boost: 1,
-  };
 
   if (node?.exactNameBang) {
     const terms = exactEsPaths.map((esPath) => ({
@@ -206,7 +195,6 @@ function compileNameTextField({ definition, value, node }) {
           ...(operator ? { operator } : {}),
           boost: 2,
         }),
-        createMatchClause(basePath, value, fuzzyOptions),
       ],
       minimum_should_match: 1,
     },

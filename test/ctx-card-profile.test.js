@@ -221,10 +221,24 @@ test("built-in ctx.card profile supports unique and prefer mappings on card-pref
 
   const uniqueCards = engine.compile("unique:cards", { profile: "ctx.card" });
   assert.deepEqual(uniqueCards.collapse, { field: "card.oracle_id" });
+  assert.deepEqual(uniqueCards.aggs, {
+    collapsed_total: {
+      cardinality: {
+        field: "card.oracle_id",
+      },
+    },
+  });
   assert.deepEqual(uniqueCards.sort[0], { "card.name.keyword": { order: "asc", unmapped_type: "keyword" } });
 
   const uniqueArt = engine.compile("unique:art", { profile: "ctx.card" });
   assert.deepEqual(uniqueArt.collapse, { field: "card.illustration_id" });
+  assert.deepEqual(uniqueArt.aggs, {
+    collapsed_total: {
+      cardinality: {
+        field: "card.illustration_id",
+      },
+    },
+  });
 
   const preferredDefault = engine.compile("prefer:default", { profile: "ctx.card" });
   assert.deepEqual(preferredDefault.query, { match_all: {} });
@@ -295,16 +309,6 @@ test("built-in ctx.card profile applies name= include-style semantics", () => {
             "card.name.infix": {
               query: "jace",
               boost: 2,
-            },
-          },
-        },
-        {
-          match: {
-            "card.name": {
-              query: "jace",
-              fuzziness: "AUTO",
-              prefix_length: 3,
-              boost: 1,
             },
           },
         },
