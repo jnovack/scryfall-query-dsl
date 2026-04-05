@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.1+c98b97b | built 2026-04-05T10:26:33.276Z */
+/* scryfall-query-dsl v0.2.0-rc.1+3f372f7 | built 2026-04-05T19:14:30.731Z */
 var ScryfallQueryDSL = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -2919,8 +2919,8 @@ var ScryfallQueryDSL = (() => {
 
   // src/runtime/version.js
   var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
-  var RELEASE = true ? "0.2.0-rc.1+c98b97b" : VERSION;
-  var BUILD_DATE = true ? "2026-04-05T10:26:33.276Z" : "unbundled";
+  var RELEASE = true ? "0.2.0-rc.1+3f372f7" : VERSION;
+  var BUILD_DATE = true ? "2026-04-05T19:14:30.731Z" : "unbundled";
   var announced = false;
   function announceBrowserBuild() {
     if (announced || typeof window === "undefined" || typeof console?.info !== "function") {
