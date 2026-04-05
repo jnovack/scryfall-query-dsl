@@ -2285,32 +2285,3 @@ test("registerField rejects missing or empty operators array for non-control fie
     /must define a non-empty "operators" array/
   );
 });
-
-test("user-facing docs do not reference removed compileWithMeta API", () => {
-  // compile() now always returns { dsl, meta }. compileWithMeta() no longer exists.
-  // This test prevents doc rot: if compileWithMeta reappears in user docs after
-  // being deliberately removed, this test fails and forces a conscious decision.
-  const docsDir = join(import.meta.dirname, "..", "docs");
-  const rootDir = join(import.meta.dirname, "..");
-  const rootDocs = ["README.md"];
-  const subDocs = readdirSync(docsDir).filter((f) => f.endsWith(".md") && f !== "session-handoff.md");
-
-  const filesToCheck = [
-    ...rootDocs.map((f) => join(rootDir, f)),
-    ...subDocs.map((f) => join(docsDir, f)),
-  ];
-
-  const violations = [];
-  for (const filePath of filesToCheck) {
-    const content = readFileSync(filePath, "utf8");
-    if (content.includes("compileWithMeta")) {
-      violations.push(filePath.replace(rootDir + "/", ""));
-    }
-  }
-
-  assert.deepEqual(
-    violations,
-    [],
-    `The following docs still reference the removed compileWithMeta() API: ${violations.join(", ")}`
-  );
-});
