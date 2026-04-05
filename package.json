@@ -22,7 +22,9 @@
     "build:cjs": "node ./scripts/build.mjs --format=cjs",
     "build:esm": "node ./scripts/build.mjs --format=esm",
     "dev": "node ./scripts/build.mjs --watch --format=browser",
-    "test": "node --test ./test/**/*.test.js"
+    "test": "node --test ./test/**/*.test.js",
+    "docs:keywords": "node scripts/generate-keyword-docs.mjs",
+    "docs:build": "npm run docs:keywords"
   },
   "keywords": [
     "scryfall",
@@ -34,6 +36,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "clean-jsdoc-theme": "^4.3.0",
     "esbuild": "^0.25.1"
   }
 }

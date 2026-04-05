@@ -95,21 +95,6 @@ function mergeBooleanResults(operator, results) {
   };
 }
 
-function uniqueStrings(values) {
-  const seen = new Set();
-  const result = [];
-
-  for (const value of values) {
-    if (seen.has(value)) {
-      continue;
-    }
-
-    seen.add(value);
-    result.push(value);
-  }
-
-  return result;
-}
 
 function resolveControlPath(path, context) {
   if (typeof path !== "string" || !path) {
@@ -399,6 +384,8 @@ function applySearchControls(controls, controlConfig) {
     sort.push(...buildOrderSorts(state.order, state.direction, controlConfig));
   } else if (state.unique === "cards") {
     sort.push(...buildOrderSorts("name", state.direction, controlConfig));
+  } else if (state.unique === "prints") {
+    sort.push(...buildOrderSorts("released", state.direction, controlConfig));
   }
 
   if (state.prefer) {
@@ -475,21 +462,6 @@ export function createCompiler({ registry, controlConfig = DEFAULT_CONTROL_CONFI
       const query = compiled.clause ?? { match_all: {} };
       const controls = applySearchControls(compiled.controls, controlConfig);
       const hasControls = Object.keys(controls).length > 0;
-
-      if (!hasControls) {
-        return query;
-      }
-
-      return {
-        query,
-        ...controls,
-      };
-    },
-    compileWithMeta(ast) {
-      const compiled = compileNode(ast);
-      const query = compiled.clause ?? { match_all: {} };
-      const controls = applySearchControls(compiled.controls, controlConfig);
-      const hasControls = Object.keys(controls).length > 0;
       const dsl = hasControls
         ? {
             query,
@@ -498,8 +470,8 @@ export function createCompiler({ registry, controlConfig = DEFAULT_CONTROL_CONFI
         : query;
 
       const shortcutTerms = (compiled.meta ?? []).filter((entry) => entry?.type === "shortcut-term");
-      const validTerms = uniqueStrings(shortcutTerms.filter((entry) => entry.valid).map((entry) => entry.term));
-      const invalidTerms = uniqueStrings(shortcutTerms.filter((entry) => !entry.valid).map((entry) => entry.term));
+      const validTerms = [...new Set(shortcutTerms.filter((entry) => entry.valid).map((entry) => entry.term))];
+      const invalidTerms = [...new Set(shortcutTerms.filter((entry) => !entry.valid).map((entry) => entry.term))];
       const warnings = shortcutTerms
         .filter((entry) => !entry.valid)
         .map((entry) => ({

@@ -8,6 +8,26 @@ function prefixPath(path, prefix) {
   return `${prefix}.${path}`;
 }
 
+/**
+ * Elasticsearch field path configuration for sort, collapse, prefer, and lang operations.
+ *
+ * @module scryfall-query-dsl/control-config
+ */
+
+/**
+ * Default Elasticsearch field path configuration used by the compiler for sort,
+ * collapse, prefer, and lang operations.
+ *
+ * Pass a custom config to `createPrefixedControlConfig()` when building a profile
+ * that targets a nested document layout where field paths differ from the defaults.
+ *
+ * @type {object}
+ * @property {{ cards: string, art: string }} collapseFields - Fields used for `unique:cards` and `unique:art` collapse.
+ * @property {Record<string, string>} orderFields - Maps `order:` values to ES sort field paths.
+ * @property {Record<string, string>} orderScriptFields - Maps script-based sort values (rarity, colors) to ES field paths.
+ * @property {string} langField - Field path for language preference sorting.
+ * @property {object} prefer - Field paths used by each `prefer:` directive.
+ */
 export const DEFAULT_CONTROL_CONFIG = {
   collapseFields: {
     cards: "oracle_id",
@@ -62,8 +82,29 @@ export const DEFAULT_CONTROL_CONFIG = {
   },
 };
 
-// Build a control configuration that targets a nested object path.
-// Example: prefix "card" turns "prices.usd" into "card.prices.usd".
+/**
+ * Build a control configuration that targets a nested object path.
+ *
+ * Example: prefix `"card"` turns `"prices.usd"` into `"card.prices.usd"`.
+ * Used internally by the `"ctx.card"` built-in profile.
+ *
+ * WARNING: This function manually mirrors every key in `DEFAULT_CONTROL_CONFIG`.
+ * If you add a new key to `DEFAULT_CONTROL_CONFIG`, you MUST add a matching prefixed entry
+ * here, or the `ctx.card` profile (and any other prefixed profile) will silently use
+ * the un-prefixed path, causing incorrect ES queries against nested document layouts.
+ * There are no compile-time or test-time guards for this drift — add a test when
+ * adding new config keys.
+ *
+ * @param {string} prefix - Non-empty string to prepend to all field paths (e.g. `"card"`).
+ * @param {object} [baseConfig=DEFAULT_CONTROL_CONFIG] - Base config to prefix. Defaults to `DEFAULT_CONTROL_CONFIG`.
+ * @returns {object} A new control config with all field paths prefixed.
+ * @throws {Error} If `prefix` is empty or not a string.
+ *
+ * @example
+ * import { createPrefixedControlConfig } from 'scryfall-query-dsl';
+ * const cardConfig = createPrefixedControlConfig('card');
+ * // cardConfig.orderFields.usd === 'card.prices.usd'
+ */
 export function createPrefixedControlConfig(prefix, baseConfig = DEFAULT_CONTROL_CONFIG) {
   assertPrefix(prefix);
 

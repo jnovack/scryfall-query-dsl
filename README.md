@@ -26,17 +26,20 @@ npm install
 import { createEngine } from "scryfall-query-dsl";
 
 const engine = createEngine();
-const dsl = engine.compile("c:red mv<=3");
+const { dsl } = engine.compile("c:red mv<=3");
 
 console.log(JSON.stringify(dsl, null, 2));
 ```
 
 ### Compile with Metadata
 
+`compile()` always returns `{ dsl, meta }`. Use `meta` to inspect unknown tokens without throwing.
+
 ```js
-const result = engine.compileWithMeta("is:rare is:unknown_token");
-console.log(result.dsl);
-console.log(result.meta);
+const { dsl, meta } = engine.compile("is:rare is:unknown_token");
+console.log(dsl);
+console.log(meta.terms.valid);   // ["is:rare"]
+console.log(meta.terms.invalid); // ["is:unknown_token"]
 ```
 
 ## Built-in Capability Snapshot

@@ -39,34 +39,34 @@ Parses a query string into an AST.
 
 Compiles a query string or AST into Elasticsearch DSL.
 
+Always returns `{ dsl, meta }`.
+
 ```js
-const dsl = engine.compile("c:red mv<=3 pow>=2");
+const { dsl, meta } = engine.compile("c:red mv<=3 pow>=2");
 ```
 
 Options:
 
 - `profile` (optional): profile name, default is `default`
 
-Return shape:
+`dsl` shape:
 
 - plain query clause when no search controls are present
 - full search body (`{ query, sort?, collapse?, aggs? }`) when controls like `unique`, `order`, `prefer`, `direction`, `lang` are present
 - when `unique:cards` or `unique:art` is active, `aggs.collapsed_total` is emitted as a `cardinality` aggregation on the collapse field
 
-## `engine.compileWithMeta(queryOrAst, options?)`
-
-Compiles like `compile` but returns metadata for non-fatal shortcut handling.
-
-```js
-const result = engine.compileWithMeta("is:rare is:unknownthing");
-// { dsl, meta }
-```
-
 `meta` includes:
 
-- `terms.valid`
-- `terms.invalid`
-- `warnings` (for example `UNKNOWN_IS_NOT_TOKEN`)
+- `terms.valid` — list of successfully compiled full terms (for example `["is:rare"]`)
+- `terms.invalid` — list of skipped unknown terms (for example `["is:unknownthing"]`)
+- `warnings` — array of warning objects (for example `{ code: "UNKNOWN_IS_NOT_TOKEN", term: "is:unknownthing" }`)
+
+```js
+const { dsl, meta } = engine.compile("is:rare is:unknownthing");
+// meta.terms.valid   → ["is:rare"]
+// meta.terms.invalid → ["is:unknownthing"]
+// meta.warnings      → [{ code: "UNKNOWN_IS_NOT_TOKEN", ... }]
+```
 
 ## `engine.extend(extension)`
 

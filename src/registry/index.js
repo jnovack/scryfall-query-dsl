@@ -16,8 +16,21 @@ function assertFieldDefinition(name, definition) {
     throw new Error(`Field "${name}" must define a non-empty "esPath".`);
   }
 
+  if (!definition.searchControl && !/^[@a-zA-Z0-9_.\-]+$/.test(definition.esPath)) {
+    throw new Error(
+      `Field "${name}" esPath "${definition.esPath}" contains invalid characters. Only letters, digits, underscores, dots, hyphens, and @ are allowed.`
+    );
+  }
+
   if (typeof definition.compile !== "function") {
     throw new Error(`Field "${name}" must define a "compile" function.`);
+  }
+
+  if (
+    !definition.searchControl &&
+    (!Array.isArray(definition.operators) || definition.operators.length === 0)
+  ) {
+    throw new Error(`Field "${name}" must define a non-empty "operators" array.`);
   }
 }
 
@@ -98,10 +111,6 @@ export function createRegistry() {
 
     assertAliasAvailable(alias, definition.name, override);
     aliases.set(alias, definition.name);
-
-    if (!definition.aliases.includes(alias)) {
-      definition.aliases.push(alias);
-    }
   }
 
   function extend(extension = {}) {

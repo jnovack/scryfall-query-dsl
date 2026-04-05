@@ -1,16 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createEngine } from "../src/index.js";
+import { createEngine, compileColorField, parseColorExpression } from "../src/index.js";
 import { DEFAULT_CONTROL_CONFIG, createPrefixedControlConfig } from "../src/compiler/control-config.js";
 import { createDefaultFieldDefinitions } from "../src/fields/defaults.js";
 import { createCtxCardProfileExtension, deriveCtxCardFieldDefinitions } from "../src/profiles/ctx-card.js";
 
-function buildExactColorClause(path, required, excluded) {
+function wrapNested(path, clause) {
+  return { nested: { path, query: clause, ignore_unmapped: true } };
+}
+
+function buildContainsColorClause(path, colors) {
   return {
     bool: {
-      must: required.map((symbol) => ({ term: { [path]: symbol } })),
-      must_not: excluded.map((symbol) => ({ term: { [path]: symbol } })),
+      must: colors.map((symbol) => ({ term: { [path]: symbol } })),
     },
   };
 }
@@ -49,7 +52,7 @@ test("derived ctx.card profile compiles non-control clauses against card-prefixe
   const engine = createEngine();
   engine.registerProfile("ctx_card_manual", createCtxCardProfileExtension(), { override: true });
 
-  const dsl = engine.compile("c:red t:dragon mv<=5 not:showcase", { profile: "ctx_card_manual" });
+  const { dsl } = engine.compile("c:red t:dragon mv<=5 not:showcase", { profile: "ctx_card_manual" });
 
   assert.deepEqual(dsl, {
     bool: {
@@ -57,8 +60,8 @@ test("derived ctx.card profile compiles non-control clauses against card-prefixe
         {
           bool: {
             should: [
-              buildExactColorClause("card.colors", ["R"], ["W", "U", "B", "G"]),
-              buildExactColorClause("card.card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+              buildContainsColorClause("card.colors", ["R"]),
+              wrapNested("card.card_faces", buildContainsColorClause("card.card_faces.colors", ["R"])),
             ],
             minimum_should_match: 1,
           },
@@ -67,7 +70,7 @@ test("derived ctx.card profile compiles non-control clauses against card-prefixe
           bool: {
             should: [
               { match: { "card.type_line": "dragon" } },
-              { match: { "card.card_faces.type_line": "dragon" } },
+              wrapNested("card.card_faces", { match: { "card.card_faces.type_line": "dragon" } }),
             ],
             minimum_should_match: 1,
           },
@@ -156,6 +159,48 @@ test("prefixed control config preserves control coverage while remapping fields"
   assert.equal(prefixed.prefer.atypicalFields.frameEffect, "card.frame_effect");
 });
 
+test("prefixed control config covers all prefer sub-keys from DEFAULT_CONTROL_CONFIG", () => {
+  // Guard against key drift: if a new key is added to DEFAULT_CONTROL_CONFIG.prefer.*
+  // but not to createPrefixedControlConfig, the ctx.card profile silently uses the
+  // wrong (un-prefixed) path. This test will fail when a key is added to one but not both.
+  const prefixed = createPrefixedControlConfig("card");
+
+  assert.deepEqual(
+    Object.keys(prefixed.prefer).sort(),
+    Object.keys(DEFAULT_CONTROL_CONFIG.prefer).sort(),
+    "prefer top-level keys must match between DEFAULT_CONTROL_CONFIG and createPrefixedControlConfig"
+  );
+
+  assert.deepEqual(
+    Object.keys(prefixed.prefer.defaultPrintingSortFields).sort(),
+    Object.keys(DEFAULT_CONTROL_CONFIG.prefer.defaultPrintingSortFields).sort(),
+    "prefer.defaultPrintingSortFields keys must match"
+  );
+
+  assert.deepEqual(
+    Object.keys(prefixed.prefer.oldestFields).sort(),
+    Object.keys(DEFAULT_CONTROL_CONFIG.prefer.oldestFields).sort(),
+    "prefer.oldestFields keys must match"
+  );
+
+  assert.deepEqual(
+    Object.keys(prefixed.prefer.newestFields).sort(),
+    Object.keys(DEFAULT_CONTROL_CONFIG.prefer.newestFields).sort(),
+    "prefer.newestFields keys must match"
+  );
+
+  assert.deepEqual(
+    Object.keys(prefixed.prefer.atypicalFields).sort(),
+    Object.keys(DEFAULT_CONTROL_CONFIG.prefer.atypicalFields).sort(),
+    "prefer.atypicalFields keys must match"
+  );
+
+  // Spot-check that string fields are also prefixed (not nested objects)
+  assert.equal(prefixed.prefer.usdField, "card.prices.usd");
+  assert.equal(prefixed.prefer.promoField, "card.promo");
+  assert.equal(prefixed.prefer.universesBeyondField, "card.universes_beyond");
+});
+
 test("built-in ctx.card profile is available without manual registration", () => {
   const engine = createEngine();
 
@@ -165,15 +210,15 @@ test("built-in ctx.card profile is available without manual registration", () =>
 
 test("built-in ctx.card profile applies control paths to card-prefixed fields", () => {
   const engine = createEngine();
-  const dsl = engine.compile("c:red unique:cards order:name direction:desc prefer:newest lang:ja", {
+  const { dsl } = engine.compile("c:red unique:cards order:name direction:desc prefer:newest lang:ja", {
     profile: "ctx.card",
   });
 
   assert.deepEqual(dsl.query, {
     bool: {
       should: [
-        buildExactColorClause("card.colors", ["R"], ["W", "U", "B", "G"]),
-        buildExactColorClause("card.card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+        buildContainsColorClause("card.colors", ["R"]),
+        wrapNested("card.card_faces", buildContainsColorClause("card.card_faces.colors", ["R"])),
       ],
       minimum_should_match: 1,
     },
@@ -205,34 +250,34 @@ test("built-in ctx.card profile supports order mappings across card-prefixed fie
 
   for (const [query, field, expected] of fieldOrderCases) {
     const result = engine.compile(query, { profile: "ctx.card" });
-    assert.deepEqual(result.query, { match_all: {} });
-    assert.deepEqual(result.sort[0], { [field]: expected });
+    assert.deepEqual(result.dsl.query, { match_all: {} });
+    assert.deepEqual(result.dsl.sort[0], { [field]: expected });
   }
 
   const rarity = engine.compile("order:rarity", { profile: "ctx.card" });
   const color = engine.compile("order:color", { profile: "ctx.card" });
 
-  assert.equal(rarity.sort[0]._script.script.params.field, "card.rarity");
-  assert.equal(color.sort[0]._script.script.params.field, "card.colors");
+  assert.equal(rarity.dsl.sort[0]._script.script.params.field, "card.rarity");
+  assert.equal(color.dsl.sort[0]._script.script.params.field, "card.colors");
 });
 
 test("built-in ctx.card profile supports unique and prefer mappings on card-prefixed fields", () => {
   const engine = createEngine();
 
   const uniqueCards = engine.compile("unique:cards", { profile: "ctx.card" });
-  assert.deepEqual(uniqueCards.collapse, { field: "card.oracle_id" });
-  assert.deepEqual(uniqueCards.aggs, {
+  assert.deepEqual(uniqueCards.dsl.collapse, { field: "card.oracle_id" });
+  assert.deepEqual(uniqueCards.dsl.aggs, {
     collapsed_total: {
       cardinality: {
         field: "card.oracle_id",
       },
     },
   });
-  assert.deepEqual(uniqueCards.sort[0], { "card.name.keyword": { order: "asc", unmapped_type: "keyword" } });
+  assert.deepEqual(uniqueCards.dsl.sort[0], { "card.name.keyword": { order: "asc", unmapped_type: "keyword" } });
 
   const uniqueArt = engine.compile("unique:art", { profile: "ctx.card" });
-  assert.deepEqual(uniqueArt.collapse, { field: "card.illustration_id" });
-  assert.deepEqual(uniqueArt.aggs, {
+  assert.deepEqual(uniqueArt.dsl.collapse, { field: "card.illustration_id" });
+  assert.deepEqual(uniqueArt.dsl.aggs, {
     collapsed_total: {
       cardinality: {
         field: "card.illustration_id",
@@ -241,8 +286,8 @@ test("built-in ctx.card profile supports unique and prefer mappings on card-pref
   });
 
   const preferredDefault = engine.compile("prefer:default", { profile: "ctx.card" });
-  assert.deepEqual(preferredDefault.query, { match_all: {} });
-  assert.deepEqual(preferredDefault.sort, [
+  assert.deepEqual(preferredDefault.dsl.query, { match_all: {} });
+  assert.deepEqual(preferredDefault.dsl.sort, [
     { "card.full_art": { order: "asc", unmapped_type: "boolean" } },
     { "card.promo_types": { order: "asc", unmapped_type: "keyword", missing: "_first" } },
     { "card.frame_effects": { order: "asc", unmapped_type: "keyword", missing: "_first" } },
@@ -271,11 +316,11 @@ test("built-in ctx.card keeps default order-value validation behavior", () => {
 test("built-in ctx.card profile compiles exact-name bang against card-prefixed exact paths", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("!fire", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("!fire", { profile: "ctx.card" }).dsl, {
     bool: {
       should: [
         { term: { "card.name.keyword": "fire" } },
-        { term: { "card.card_faces.name.keyword": "fire" } },
+        wrapNested("card.card_faces", { term: { "card.card_faces.name.keyword": "fire" } }),
       ],
       minimum_should_match: 1,
     },
@@ -285,7 +330,7 @@ test("built-in ctx.card profile compiles exact-name bang against card-prefixed e
 test("built-in ctx.card profile applies name= include-style semantics", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("name=jace", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("name=jace", { profile: "ctx.card" }).dsl, {
     bool: {
       should: [
         {
@@ -321,17 +366,17 @@ test("built-in ctx.card profile applies name= include-style semantics", () => {
 test("built-in ctx.card profile supports legality aliases and date/year fields", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("f:modern banned:historic restricted:vintage", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("f:modern banned:historic restricted:vintage", { profile: "ctx.card" }).dsl, {
     bool: {
       must: [
         { term: { "card.legalities.modern": "legal" } },
-        { term: { "card.legalities.historic": "not_legal" } },
+        { term: { "card.legalities.historic": "banned" } },
         { term: { "card.legalities.vintage": "restricted" } },
       ],
     },
   });
 
-  assert.deepEqual(engine.compile("date>=2015-08-18 year<=2020", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("date>=2015-08-18 year<=2020", { profile: "ctx.card" }).dsl, {
     bool: {
       must: [
         { range: { "card.released_at": { gte: "2015-08-18" } } },
@@ -344,24 +389,18 @@ test("built-in ctx.card profile supports legality aliases and date/year fields",
 test("built-in ctx.card profile compiles is:commander semantic shortcut against card-prefixed fields", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("is:commander", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("is:commander", { profile: "ctx.card" }).dsl, {
     bool: {
       should: [
         {
           bool: {
             must: [
-              {
-                bool: {
-                  must_not: [
-                    { term: { "card.legalities.commander": "banned" } },
-                  ],
-                },
-              },
+              { term: { "card.legalities.commander": "legal" } },
               {
                 bool: {
                   should: [
                     { match: { "card.type_line": { query: "legendary", operator: "and" } } },
-                    { match: { "card.card_faces.type_line": { query: "legendary", operator: "and" } } },
+                    wrapNested("card.card_faces", { match: { "card.card_faces.type_line": { query: "legendary", operator: "and" } } }),
                   ],
                   minimum_should_match: 1,
                 },
@@ -370,9 +409,9 @@ test("built-in ctx.card profile compiles is:commander semantic shortcut against 
                 bool: {
                   should: [
                     { match: { "card.type_line": { query: "artifact", operator: "and" } } },
-                    { match: { "card.card_faces.type_line": { query: "artifact", operator: "and" } } },
+                    wrapNested("card.card_faces", { match: { "card.card_faces.type_line": { query: "artifact", operator: "and" } } }),
                     { match: { "card.type_line": { query: "creature", operator: "and" } } },
-                    { match: { "card.card_faces.type_line": { query: "creature", operator: "and" } } },
+                    wrapNested("card.card_faces", { match: { "card.card_faces.type_line": { query: "creature", operator: "and" } } }),
                   ],
                   minimum_should_match: 1,
                 },
@@ -386,7 +425,7 @@ test("built-in ctx.card profile compiles is:commander semantic shortcut against 
           bool: {
             should: [
               { match_phrase: { "card.oracle_text": "can be your commander" } },
-              { match_phrase: { "card.card_faces.oracle_text": "can be your commander" } },
+              wrapNested("card.card_faces", { match_phrase: { "card.card_faces.oracle_text": "can be your commander" } }),
             ],
             minimum_should_match: 1,
           },
@@ -400,7 +439,7 @@ test("built-in ctx.card profile compiles is:commander semantic shortcut against 
 test("built-in ctx.card profile supports comparison-style not-equals and rejects keyword not-equals", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("mv!=3", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("mv!=3", { profile: "ctx.card" }).dsl, {
     bool: {
       must_not: [
         { term: { "card.cmc": 3 } },
@@ -417,12 +456,88 @@ test("built-in ctx.card profile supports comparison-style not-equals and rejects
 test("built-in ctx.card profile compiles numeric power/toughness fields against card companion paths", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("pow>=3 tou<=2", { profile: "ctx.card" }), {
+  assert.deepEqual(engine.compile("pow>=3 tou<=2", { profile: "ctx.card" }).dsl, {
     bool: {
       must: [
         { range: { "card.power_num": { gte: 3 } } },
         { range: { "card.toughness_num": { lte: 2 } } },
       ],
+    },
+  });
+});
+
+test("built-in ctx.card profile compiles game:/in: against card-prefixed games field", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("game:paper", { profile: "ctx.card" }).dsl, {
+    term: { "card.games": "paper" },
+  });
+
+  assert.deepEqual(engine.compile("in:mtgo", { profile: "ctx.card" }).dsl, {
+    term: { "card.games": "mtgo" },
+  });
+});
+
+test("built-in ctx.card profile compiles is:digital against card-prefixed games field", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:digital", { profile: "ctx.card" }).dsl, {
+    bool: {
+      should: [
+        { term: { "card.games": "mtgo" } },
+        { term: { "card.games": "arena" } },
+      ],
+      minimum_should_match: 1,
+    },
+  });
+});
+
+test("built-in ctx.card profile compiles is:promo and is:spotlight against card-prefixed boolean fields", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:promo", { profile: "ctx.card" }).dsl, {
+    term: { "card.promo": true },
+  });
+
+  assert.deepEqual(engine.compile("is:spotlight", { profile: "ctx.card" }).dsl, {
+    term: { "card.story_spotlight": true },
+  });
+});
+
+test("resolveNestedPath uses longest-matching container regardless of registration order", () => {
+  // Regression test for first-match vs. longest-match behavior.
+  // When nestedContainers includes both "outer" and "outer.inner" and the esPath
+  // is "outer.inner.colors", the correct container is "outer.inner", not "outer".
+  // A first-match implementation with ["outer", "outer.inner"] would incorrectly
+  // pick "outer"; longest-match must win.
+  const engine = createEngine();
+
+  // Register a color-type field with doubly-nested containers listed shallower-first.
+  // If first-match is used, "outer" would win over "outer.inner" for path "outer.inner.colors".
+  engine.registerProfile("nested_test", {
+    override: true,
+    fields: {
+      colors: {
+        aliases: ["c", "color"],
+        esPath: "outer.inner.colors",
+        esPaths: ["outer.inner.colors"],
+        nestedContainers: ["outer", "outer.inner"],
+        type: "color-set",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
+        parseValue: parseColorExpression,
+        compile: compileColorField,
+      },
+    },
+  });
+
+  const { dsl } = engine.compile("c:red", { profile: "nested_test" });
+
+  // The nested query must use the deepest matching container "outer.inner",
+  // not the shallower "outer".
+  assert.equal(dsl.nested?.path, "outer.inner", "nested path must be the longest match");
+  assert.deepEqual(dsl.nested?.query, {
+    bool: {
+      must: [{ term: { "outer.inner.colors": "R" } }],
     },
   });
 });

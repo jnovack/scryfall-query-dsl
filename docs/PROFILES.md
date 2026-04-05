@@ -185,7 +185,7 @@ engine.registerProfile("collection", {
   }
 });
 
-const dsl = engine.compile("color<=mardu legal:commander frame:2015 ip>1", {
+const { dsl } = engine.compile("color<=mardu legal:commander frame:2015 ip>1", {
   profile: "collection"
 });
 ```
@@ -218,7 +218,7 @@ Expect loud failures for:
 - unsupported operators per field
 - parse/coercion failures in field parsers
 
-For non-fatal shortcut token handling (`is:` / `not:` unknown tokens), use `compileWithMeta()` from [API.md](./API.md).
+For non-fatal shortcut token handling (`is:` / `not:` unknown tokens), use `compile()` from [API.md](./API.md). Unknown tokens are surfaced in `meta.terms.invalid` and `meta.warnings` without throwing.
 
 ## Related Docs
 

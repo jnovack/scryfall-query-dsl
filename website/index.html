@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keyword Reference — scryfall-query-dsl</title>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+    crossorigin="anonymous"
+  />
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
+    integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
+  />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg: #0f1218;
+      --surface: #22262e;
+      --border: #2e3340;
+      --text: #d4d8e2;
+      --text-muted: #8b92a5;
+      --accent: #4e9af1;
+      --badge-name-bg: #1e3a5f;
+      --badge-name-text: #7ec4ff;
+      --badge-op-bg: #2a2030;
+      --badge-op-text: #c084fc;
+      --code-bg: #161920;
+      --nav-width: 240px;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(180deg, #0f1218 0%, #141923 100%);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+    }
+
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: var(--nav-width);
+      height: 100vh;
+      overflow-y: auto;
+      background: rgba(26, 29, 36, 0.98);
+      border-right: 1px solid rgba(148, 163, 184, 0.2);
+      padding: 1.5rem 1rem;
+    }
+
+    nav h1 {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin: 0 0 1rem;
+    }
+
+    nav ul { list-style: none; margin: 0; padding: 0; }
+    nav li { margin: 0.2rem 0; }
+    nav a {
+      display: block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    nav a:hover { color: var(--text); background: var(--border); }
+
+    main {
+      margin-left: var(--nav-width);
+      padding: 2rem 3rem;
+      max-width: 900px;
+      width: 100%;
+    }
+
+    main > header { margin-bottom: 2.5rem; }
+    main > header h1 { font-size: 1.75rem; margin: 0 0 0.5rem; }
+    main > header p { color: var(--text-muted); margin: 0; line-height: 1.6; }
+    main > header a { color: var(--accent); }
+
+    section.group { margin-bottom: 2.5rem; }
+    section.group h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .field-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+    .field-card {
+      border-radius: 8px;
+      padding: 0.85rem 1.1rem;
+    }
+
+    /* Grayed-out card for unimplemented syntax */
+    .field-card--unsupported {
+      opacity: 0.4;
+    }
+
+    /* Dashed border for "supported parser feature" notes */
+    .field-card--note {
+      border-style: dashed;
+    }
+
+    .field-header {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2em 0.55em;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      border: 1px solid transparent;
+    }
+
+    .badge-name {
+      background: var(--badge-name-bg);
+      color: var(--badge-name-text);
+      border-color: rgba(126, 196, 255, 0.35);
+    }
+
+    .badge-unsupported {
+      background: #252830;
+      color: #fff;
+    }
+
+    .badge-op {
+      background: var(--badge-op-bg);
+      color: var(--badge-op-text);
+    }
+
+    .field-ops { margin-left: auto; display: flex; gap: 0.25rem; flex-wrap: wrap; }
+
+    .field-desc {
+      margin: 0.4rem 0 0.6rem;
+      font-size: 0.875rem;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    .field-card--unsupported .field-desc {
+      color: var(--text-muted);
+    }
+
+    .unsupported-tag {
+      font-size: 0.72rem;
+      color: #f8fafc;
+      margin-left: auto;
+      font-style: italic;
+      white-space: nowrap;
+    }
+
+    .supported-badge {
+      display: inline-block;
+      padding: 0.2em 0.6em;
+      border-radius: 4px;
+      background: #1a3a1a;
+      color: #6dbf6d;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+
+    .field-examples { margin-top: 0.4rem; }
+    .examples-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .field-examples ul {
+      list-style: none;
+      margin: 0.3rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .field-examples li code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.2em 0.5em;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+
+    @media (max-width: 700px) {
+      nav { display: none; }
+      main { margin-left: 0; padding: 1.5rem; }
+      .field-ops { margin-left: 0; }
+    }
+  </style>
+</head>
+<body data-bs-theme="dark" class="bg-dark text-light">
+  <nav>
+    <h1><i class="fa-solid fa-layer-group me-2" aria-hidden="true"></i>Keyword Reference</h1>
+    <ul>
+      <li><a href="#colors">Colors and Color Identity</a></li><li><a href="#card-types">Card Types</a></li><li><a href="#card-text">Card Text</a></li><li><a href="#mana-costs">Mana Costs</a></li><li><a href="#power-toughness-loyalty">Power, Toughness, and Loyalty</a></li><li><a href="#multi-faced">Multi-faced Cards</a></li><li><a href="#effects">Spells, Permanents, and Effects</a></li><li><a href="#extra-funny">Extra Cards and Funny Cards</a></li><li><a href="#rarity">Rarity</a></li><li><a href="#sets">Sets and Blocks</a></li><li><a href="#cubes">Cubes</a></li><li><a href="#legality">Format Legality</a></li><li><a href="#prices">USD/EUR/TIX Prices</a></li><li><a href="#artist-flavor">Artist, Flavor Text and Watermark</a></li><li><a href="#border-frame">Border, Frame, Foil and Resolution</a></li><li><a href="#games-promos">Games, Promos and Spotlights</a></li><li><a href="#year">Year</a></li><li><a href="#tagger-tags">Tagger Tags</a></li><li><a href="#reprints">Reprints</a></li><li><a href="#languages">Languages</a></li><li><a href="#shortcuts">Shortcuts and Nicknames</a></li><li><a href="#negation">Negating Conditions</a></li><li><a href="#regex">Regular Expressions</a></li><li><a href="#exact-names">Exact Names</a></li><li><a href="#or">Using OR</a></li><li><a href="#nesting">Nesting Conditions</a></li><li><a href="#display">Display Keywords</a></li>
+    </ul>
+  </nav>
+  <main>
+    <header>
+      <h1><i class="fa-solid fa-magnifying-glass me-2" aria-hidden="true"></i>Keyword Reference</h1>
+      <p>
+        Supported query fields for <strong>scryfall-query-dsl</strong>, ordered to match the
+        <a href="https://scryfall.com/docs/syntax" target="_blank" rel="noopener">Scryfall syntax page</a>.
+        Grayed-out entries are recognized by Scryfall but not yet implemented in this library.
+        See <a href="index.html"><i class="fa-solid fa-book-open-reader me-1" aria-hidden="true"></i>API documentation</a> for integrating the engine.
+      </p>
+    </header>
+    
+  <section class="group" id="colors">
+    <h2>Colors and Color Identity</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-colors">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">colors</code> <code class="badge badge-name">c</code> <code class="badge badge-name">color</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by card color(s). Use color letters (W U B R G) or names (white blue black red green). Supports subset (:), exact (=), and comparison (&gt; &gt;= &lt; &lt;=) operators.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>c:red</code></li><li><code>color=wu</code></li><li><code>c&gt;=boros</code></li><li><code>c!=colorless</code></li><li><code>-c:green</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-color_identity">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">color_identity</code> <code class="badge badge-name">id</code> <code class="badge badge-name">identity</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by color identity (commander deck colors). Uses same color syntax as colors. id:esper finds cards that fit within an Esper deck (identity ⊆ {W,U,B}). Useful for finding cards that fit within a commander's color identity.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>id:grixis</code></li><li><code>identity=esper</code></li><li><code>id&lt;=bant</code></li><li><code>id:c</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">has:indicator</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards that have a color indicator on the card face</p>
+    </div></div>
+  </section>
+  <section class="group" id="card-types">
+    <h2>Card Types</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-type_line">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">type_line</code> <code class="badge badge-name">t</code> <code class="badge badge-name">type</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Search the type line (supertypes, types, subtypes). Searches both faces of double-faced cards.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>t:creature</code></li><li><code>type:legendary</code></li><li><code>t:dragon</code></li><li><code>t:planeswalker t:elf</code></li></ul></div>
+    </div></div>
+  </section>
+  <section class="group" id="card-text">
+    <h2>Card Text</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-oracle_text">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">oracle_text</code> <code class="badge badge-name">o</code> <code class="badge badge-name">oracle</code> <code class="badge badge-name">text</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Search oracle (rules) text. Unquoted values match word-by-word across subfields. Quoted values match the exact phrase. Searches both faces of double-faced cards.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>o:flying</code></li><li><code>o:&quot;draw a card&quot;</code></li><li><code>o:haste o:trample</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-keywords">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">keywords</code> <code class="badge badge-name">kw</code> <code class="badge badge-name">keyword</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by rules keyword (flying, trample, haste, etc.). Matches the keywords array field, not oracle text.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>keywords:flying</code></li><li><code>kw:trample</code></li><li><code>keyword:deathtouch</code></li><li><code>kw:haste kw:flash</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">fo:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Full oracle text search with reminder text excluded</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">o:/regex/</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Regular expression search on oracle text</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">~ substitution</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Use ~ in oracle text queries to stand for the card's own name</p>
+    </div></div>
+  </section>
+  <section class="group" id="mana-costs">
+    <h2>Mana Costs</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-mana_value">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">mana_value</code> <code class="badge badge-name">mv</code> <code class="badge badge-name">cmc</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by mana value (formerly converted mana cost). Supports all numeric comparison operators.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>mv=3</code></li><li><code>cmc&gt;=5</code></li><li><code>mv&lt;2</code></li><li><code>mana_value!=0</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">m:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Mana cost expression using mana symbols (e.g. m:{G}{U}, m&gt;3WU)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">produces:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Mana produced by a land or ability (e.g. produces=wu)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">devotion:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Devotion to a color (e.g. devotion:{u/b}{u/b})</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">manavalue:odd / manavalue:even</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with odd or even mana value</p>
+    </div></div>
+  </section>
+  <section class="group" id="power-toughness-loyalty">
+    <h2>Power, Toughness, and Loyalty</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-power">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">power</code> <code class="badge badge-name">pow</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by power (numeric only; cards with */X/∞ power are excluded). Supports all numeric comparison operators.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>power&gt;=5</code></li><li><code>pow=2</code></li><li><code>power&lt;3</code></li><li><code>pow!=0</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-toughness">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">toughness</code> <code class="badge badge-name">tou</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by toughness (numeric only; cards with */X/∞ toughness are excluded). Supports all numeric comparison operators.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>toughness&gt;=4</code></li><li><code>tou=1</code></li><li><code>toughness&lt;5</code></li><li><code>tou!=0</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">loyalty / loy:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Planeswalker loyalty (e.g. loy=3, loy&gt;=4)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">pt: / powtou:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Combined power+toughness comparison (e.g. pt=10)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">pow&gt;tou</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cross-field power vs. toughness math comparisons</p>
+    </div></div>
+  </section>
+  <section class="group" id="multi-faced">
+    <h2>Multi-faced Cards</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:split</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Split cards (Fire // Ice)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:flip</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Flip cards (Budoka Gardener)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:transform</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Transform (DFC) cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:meld</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Meld cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:mdfc</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Modal double-faced cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:adventure</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Adventure cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:reversible</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Reversible cards</p>
+    </div></div>
+  </section>
+  <section class="group" id="effects">
+    <h2>Spells, Permanents, and Effects</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:spell</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Instant or sorcery cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:permanent</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Permanent card types (creature, artifact, enchantment, planeswalker, land)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:historic</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Legendary, artifact, or Saga cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:vanilla</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Creatures with no abilities</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:modal</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with modal effects (choose one, choose two, etc.)</p>
+    </div></div>
+  </section>
+  <section class="group" id="extra-funny">
+    <h2>Extra Cards and Funny Cards</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:funny</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Un-set and acorn-stamped cards</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">include:extras</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Include extra cards (tokens, emblems, art cards) in results</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:oversized</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Oversized card products</p>
+    </div></div>
+  </section>
+  <section class="group" id="rarity">
+    <h2>Rarity</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-rarity">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">rarity</code> <code class="badge badge-name">r</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by rarity. Ordered from lowest to highest: common &lt; uncommon &lt; rare &lt; mythic &lt; special &lt; bonus. Supports comparison operators.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>rarity:rare</code></li><li><code>r&gt;=uncommon</code></li><li><code>rarity&lt;mythic</code></li><li><code>r=common</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">new:rarity</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards whose rarity changed from their previous printing</p>
+    </div></div>
+  </section>
+  <section class="group" id="sets">
+    <h2>Sets and Blocks</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-set">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">set</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by set code (3–5 letter code, lowercased). Use Scryfall set codes such as dmu, mh3, lea, m21.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>set:dmu</code></li><li><code>set:mh3</code></li><li><code>set:lea</code></li><li><code>-set:m21</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-set_type">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">set_type</code> <code class="badge badge-name">st</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by set type. Common values: expansion, masters, commander, core, draft_innovation, memorabilia, token, funny, duel_deck, masterpiece.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>set_type:expansion</code></li><li><code>st:commander</code></li><li><code>st:masters</code></li><li><code>-st:memorabilia</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-collector_number">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">collector_number</code> <code class="badge badge-name">cn</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by collector number within a set. Supports numeric comparisons and suffix variants (e.g. 123a, 123★). Combine with set: for precise lookup.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>cn:1</code></li><li><code>set:dmu collector_number&lt;=100</code></li><li><code>cn=250a</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">e: / edition:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Alias for set: (not yet a built-in alias)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">b: / block:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Filter by block code or name (e.g. b:wwk)</p>
+    </div></div>
+  </section>
+  <section class="group" id="cubes">
+    <h2>Cubes</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">cube:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards in a specific Scryfall cube (e.g. cube:vintage, cube:legacy)</p>
+    </div></div>
+  </section>
+  <section class="group" id="legality">
+    <h2>Format Legality</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-legal">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">legal</code> <code class="badge badge-name">f</code> <code class="badge badge-name">format</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter to cards legal in a format. Common formats: standard, pioneer, modern, legacy, vintage, commander, pauper, brawl, historic.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>legal:commander</code></li><li><code>f:modern</code></li><li><code>format:standard</code></li><li><code>legal:pauper</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-banned">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">banned</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter to cards that are banned in a format (legality status is 'banned', not merely absent from the format).</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>banned:legacy</code></li><li><code>banned:modern</code></li><li><code>banned:commander</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-restricted">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">restricted</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter to cards that are restricted in a format (limited to one copy). Currently only relevant to vintage.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>restricted:vintage</code></li></ul></div>
+    </div></div>
+  </section>
+  <section class="group" id="prices">
+    <h2>USD/EUR/TIX Prices</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-usd">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">usd</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by USD price (non-foil). Prices sourced from TCGPlayer via Scryfall.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>usd&lt;1</code></li><li><code>usd&gt;=10</code></li><li><code>usd=0.25</code></li><li><code>usd!=0</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-eur">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">eur</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by EUR price (non-foil). Prices sourced from Cardmarket via Scryfall.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>eur&lt;2</code></li><li><code>eur&gt;=5</code></li><li><code>eur=1.50</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-tix">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">tix</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">!=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by MTGO ticket price. Prices sourced from Cardhoarder via Scryfall.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>tix&lt;1</code></li><li><code>tix&gt;=5</code></li><li><code>tix=0.01</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">cheapest:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cheapest printing in a given currency (e.g. cheapest:usd)</p>
+    </div></div>
+  </section>
+  <section class="group" id="artist-flavor">
+    <h2>Artist, Flavor Text and Watermark</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-flavor_text">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">flavor_text</code> <code class="badge badge-name">ft</code> <code class="badge badge-name">flavor</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Search flavor text. Unquoted values match word-by-word. Quoted values match the exact phrase. Searches both faces of double-faced cards.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>ft:urza</code></li><li><code>flavor:&quot;Rath and Storm&quot;</code></li><li><code>ft:&quot;for the horde&quot;</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">a: / artist:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Search by artist name (e.g. a:&quot;proce&quot;)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">wm: / watermark:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Filter by watermark guild or symbol (e.g. wm:orzhov)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">artists&gt;1</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards illustrated by more than one artist</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">illustrations&gt;1</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with more than one illustration</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">new:art / new:artist / new:flavor</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with new art, new artist, or new flavor text vs. previous printing</p>
+    </div></div>
+  </section>
+  <section class="group" id="border-frame">
+    <h2>Border, Frame, Foil and Resolution</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-border_color">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">border_color</code> <code class="badge badge-name">border</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by border color. Valid values: black, white, borderless, silver, gold, yellow.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>border_color:borderless</code></li><li><code>border:black</code></li><li><code>-border:silver</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-frame">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">frame</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by frame style or frame effect. Frame styles: 1993, 1997, 2003, 2015, future. Frame effects: legendary, showcase, extendedart, inverted, colorshifted, etched, snow, and many more.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>frame:2015</code></li><li><code>frame:showcase</code></li><li><code>frame:legendary</code></li><li><code>-frame:future</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:foil">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:foil</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Cards available in foil.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:foil</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:nonfoil">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:nonfoil</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Cards available in non-foil.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:nonfoil</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:hires</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with high-resolution scan imagery</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">stamp:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Filter by security stamp (acorn, arena, oval, triangle, etc.)</p>
+    </div></div>
+  </section>
+  <section class="group" id="games-promos">
+    <h2>Games, Promos and Spotlights</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-game">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">game</code> <code class="badge badge-name">in</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by game environment. Valid values: paper, mtgo, arena, astral, sega. Use is:digital as a shorthand for in:mtgo or in:arena.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>game:paper</code></li><li><code>in:mtgo</code></li><li><code>game:arena</code></li><li><code>-in:arena</code></li></ul></div>
+    </div></div>
+  </section>
+  <section class="group" id="year">
+    <h2>Year</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-year">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">year</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by release year. Supports all numeric comparison operators. Note: != is not supported for year.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>year=2024</code></li><li><code>year&gt;=2020</code></li><li><code>year&lt;2015</code></li><li><code>year:2019</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-date">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">date</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code> <code class="badge badge-op">&gt;</code> <code class="badge badge-op">&gt;=</code> <code class="badge badge-op">&lt;</code> <code class="badge badge-op">&lt;=</code></span>
+      </div>
+      <p class="field-desc">Filter by exact release date in YYYY-MM-DD format. Supports comparison operators. Note: != is not supported; use two comparisons instead.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>date=2024-02-09</code></li><li><code>date&gt;=2020-01-01</code></li><li><code>date&lt;2015-06-01</code></li></ul></div>
+    </div></div>
+  </section>
+  <section class="group" id="tagger-tags">
+    <h2>Tagger Tags</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">art:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Tagger art tag (e.g. art:squirrel)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">function:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Tagger function tag (e.g. function:removal)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">otag:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Oracle tagger annotation tag</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">atag:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Art tagger annotation tag</p>
+    </div></div>
+  </section>
+  <section class="group" id="reprints">
+    <h2>Reprints</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:reprint</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards that have been printed in a previous set</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">not:reprint</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards making their first printing appearance</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">sets&gt;=N</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards printed in at least N sets (e.g. sets&gt;=10)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">papersets=N</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards in exactly N paper sets</p>
+    </div></div>
+  </section>
+  <section class="group" id="languages">
+    <h2>Languages</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-lang">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">lang</code> <code class="badge badge-name">language</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Prefer a language when selecting a printing. Uses ISO 639-1 language codes (en, de, fr, es, it, pt, ja, ko, ru, zhs, zht, he, la, grc, ar, sa, ph).</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>lang:en</code></li><li><code>language:ja</code></li><li><code>lang:de</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">lang:any</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards printed in any non-English language</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">new:language</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with a new-language printing vs. previous set</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">in:ru (language filter)</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Filter results to a specific language print only (lang: here is a sort preference, not an inclusion filter)</p>
+    </div></div>
+  </section>
+  <section class="group" id="shortcuts">
+    <h2>Shortcuts and Nicknames</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by card properties. Supports many token values from Scryfall (frame effects, promo types, layouts, rarities) plus semantic shortcuts: is:commander (legal commander), is:promo (promotional printing), is:spotlight (story spotlight), is:digital (MTGO or Arena only), is:default (standard printing).</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:commander</code></li><li><code>is:promo</code></li><li><code>is:digital</code></li><li><code>is:foil</code></li><li><code>is:showcase</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-not">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">not</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Exclude cards matching a property token. Uses the same token vocabulary as is: but negates the match.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>not:showcase</code></li><li><code>not:extendedart</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:dual</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Original dual lands (Tundra, Bayou, etc.)</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:fetchland</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Fetch lands</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:shockland</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Shock lands</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:checkland</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Check lands</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:companion</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards with the companion ability</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:reserved</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Cards on the reserved list</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">is:reprint</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Reprint shortcut (see Reprints section)</p>
+    </div></div>
+  </section>
+  <section class="group" id="negation">
+    <h2>Negating Conditions</h2>
+    <div class="field-list">
+    <div class="field-card field-card--note card border-success-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <span class="supported-badge"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Supported</span>
+      <p class="field-desc">Supported. Prefix any term or parenthesized group with - to negate it: -t:creature, -(c:red or c:white), -o:draw.</p>
+    </div></div>
+  </section>
+  <section class="group" id="regex">
+    <h2>Regular Expressions</h2>
+    <div class="field-list">
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">o:/regex/</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Regular expression search on oracle text</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">name:/regex/</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Regular expression name search</p>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">t:/regex/</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Regular expression type line search</p>
+    </div></div>
+  </section>
+  <section class="group" id="exact-names">
+    <h2>Exact Names</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-name">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">name</code> <code class="badge badge-name">n</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Search card name. Bare terms (without a field prefix) default to name search. Use = for exact match. Prefix with ! for exact-name bang syntax.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>name:lightning</code></li><li><code>name:&quot;Lightning Bolt&quot;</code></li><li><code>n=bolt</code></li><li><code>!&quot;Sift Through Sands&quot;</code></li></ul></div>
+    </div>
+    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name badge-unsupported">!name: / !o:</code></span>
+        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+      </div>
+      <p class="field-desc">Fielded bang exact-match forms are not yet supported</p>
+    </div></div>
+  </section>
+  <section class="group" id="or">
+    <h2>Using OR</h2>
+    <div class="field-list">
+    <div class="field-card field-card--note card border-success-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <span class="supported-badge"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Supported</span>
+      <p class="field-desc">Supported. Use the or keyword (case-insensitive) between terms: c:red or c:white, (t:angel or t:demon) c:white.</p>
+    </div></div>
+  </section>
+  <section class="group" id="nesting">
+    <h2>Nesting Conditions</h2>
+    <div class="field-list">
+    <div class="field-card field-card--note card border-success-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+      <span class="supported-badge"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Supported</span>
+      <p class="field-desc">Supported. Use parentheses to group sub-expressions: (c:red or c:white) t:angel.</p>
+    </div></div>
+  </section>
+  <section class="group" id="display">
+    <h2>Display Keywords</h2>
+    <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-unique">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">unique</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Control result deduplication. cards: one result per unique oracle identity (default). prints: all individual printings. art: one result per unique artwork.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>unique:cards</code></li><li><code>unique:prints</code></li><li><code>unique:art</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-order">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">order</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Sort results by a field. Valid values: name, cmc, power, toughness, set, rarity, color, usd, eur, tix, edhrec, released.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>order:name</code></li><li><code>order:cmc</code></li><li><code>order:usd</code></li><li><code>order:released</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-prefer">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">prefer</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Prefer a specific printing when deduplicating. Valid values: oldest, newest, usd-low, usd-high, promo, default, atypical, ub (Universes Beyond), notub.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>prefer:newest</code></li><li><code>prefer:usd-low</code></li><li><code>prefer:promo</code></li><li><code>prefer:notub</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-direction">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">direction</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Control sort direction. Valid values: asc (ascending, default) or desc (descending).</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>order:usd direction:desc</code></li><li><code>order:cmc direction:asc</code></li></ul></div>
+    </div></div>
+  </section>
+  </main>
+</body>
+</html>

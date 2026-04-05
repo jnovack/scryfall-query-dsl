@@ -1,6 +1,5 @@
 const IS_NOT_SOURCE_VALUES = {
   frame_effects: [
-    "legendary",
     "inverted",
     "extendedart",
     "showcase",
@@ -144,7 +143,6 @@ const IS_NOT_SOURCE_VALUES = {
     "expansion",
     "masters",
     "commander",
-    "promo",
     "core",
     "draft_innovation",
     "memorabilia",
@@ -154,7 +152,6 @@ const IS_NOT_SOURCE_VALUES = {
     "duel_deck",
     "masterpiece",
     "starter",
-    "alchemy",
     "planechase",
     "eternal",
     "treasure_chest",
@@ -193,7 +190,6 @@ const IS_NOT_SOURCE_VALUES = {
     "augment",
   ],
   image_status: ["highres_scan", "lowres", "placeholder", "missing"],
-  games: ["paper", "mtgo", "arena", "astral", "sega"],
   finishes: ["nonfoil", "foil", "etched"],
   "all_parts.component": ["combo_piece", "token", "meld_part", "meld_result"],
 };

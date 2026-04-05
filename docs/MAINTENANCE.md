@@ -59,7 +59,7 @@ Then run ad-hoc checks:
 ```bash
 node --input-type=module -e "import { createEngine } from './src/index.js'; const e=createEngine(); console.log(JSON.stringify(e.compile('is:rare'), null, 2));"
 node --input-type=module -e "import { createEngine } from './src/index.js'; const e=createEngine(); console.log(JSON.stringify(e.compile('not:playtest'), null, 2));"
-node --input-type=module -e "import { createEngine } from './src/index.js'; const e=createEngine(); console.log(JSON.stringify(e.compileWithMeta('is:rare is:totallynewtoken'), null, 2));"
+node --input-type=module -e "import { createEngine } from './src/index.js'; const e=createEngine(); console.log(JSON.stringify(e.compile('is:rare is:totallynewtoken'), null, 2));"
 ```
 
 Goal-first validation reminder:
@@ -72,8 +72,8 @@ Expected:
 
 - known tokens compile to DSL
 - unknown tokens do not throw
-- unknown tokens appear in `compileWithMeta().meta.terms.invalid`
-- known terms appear in `compileWithMeta().meta.terms.valid`
+- unknown tokens appear in `compile().meta.terms.invalid`
+- known terms appear in `compile().meta.terms.valid`
 
 ## Documentation Sync (Required)
 
@@ -96,7 +96,7 @@ When token behavior changes, update all of:
    `is:commander` specific reminder: if semantic criteria change, update `semanticShortcuts.commander` in default field definitions and keep engine + `ctx.card` compile-shape tests in sync.
 3. Run `npm test`.
 4. Run `npm run build`.
-5. Verify one known token and one unknown token with `compileWithMeta()`.
+5. Verify one known token and one unknown token using `compile()` and inspecting `meta.terms`.
 6. Tag/release.
 
 ## RC Closeout Checklist

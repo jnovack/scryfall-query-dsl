@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   compileColorField,
@@ -13,11 +15,15 @@ import {
   VERSION,
 } from "../src/index.js";
 
-function buildExactColorClause(path, required, excluded) {
+function wrapNested(path, clause) {
+  return { nested: { path, query: clause, ignore_unmapped: true } };
+}
+
+// Used for c:wu style queries — "contains at least" (>= semantics).
+function buildContainsColorClause(path, colors) {
   return {
     bool: {
-      must: required.map((symbol) => ({ term: { [path]: symbol } })),
-      must_not: excluded.map((symbol) => ({ term: { [path]: symbol } })),
+      must: colors.map((symbol) => ({ term: { [path]: symbol } })),
     },
   };
 }
@@ -62,11 +68,10 @@ function buildNameLooseClause(queryText) {
 function buildExactNameBangClause(queryText, paths = ["name.keyword", "card_faces.name.keyword"]) {
   return {
     bool: {
-      should: paths.map((path) => ({
-        term: {
-          [path]: queryText,
-        },
-      })),
+      should: paths.map((path) => {
+        const clause = { term: { [path]: queryText } };
+        return path.startsWith("card_faces.") ? wrapNested("card_faces", clause) : clause;
+      }),
       minimum_should_match: 1,
     },
   };
@@ -75,11 +80,10 @@ function buildExactNameBangClause(queryText, paths = ["name.keyword", "card_face
 function buildPartialTextClause(paths, queryText) {
   return {
     bool: {
-      should: paths.map((path) => ({
-        match: {
-          [path]: queryText,
-        },
-      })),
+      should: paths.map((path) => {
+        const clause = { match: { [path]: queryText } };
+        return path.startsWith("card_faces.") ? wrapNested("card_faces", clause) : clause;
+      }),
       minimum_should_match: 1,
     },
   };
@@ -246,14 +250,14 @@ test("parses not-equals operator and coexists with exact-name bang terms", () =>
 test("compiles simple queries into predictable bool must clauses", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("c:red t:dragon mv<=5"), {
+  assert.deepEqual(engine.compile("c:red t:dragon mv<=5").dsl, {
     bool: {
       must: [
         {
           bool: {
             should: [
-              buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
-              buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+              buildContainsColorClause("colors", ["R"]),
+              wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["R"])),
             ],
             minimum_should_match: 1,
           },
@@ -262,7 +266,7 @@ test("compiles simple queries into predictable bool must clauses", () => {
           bool: {
             should: [
               { match: { type_line: "dragon" } },
-              { match: { "card_faces.type_line": "dragon" } },
+              wrapNested("card_faces", { match: { "card_faces.type_line": "dragon" } }),
             ],
             minimum_should_match: 1,
           },
@@ -275,15 +279,15 @@ test("compiles simple queries into predictable bool must clauses", () => {
 
 test("supports or groups and negation", () => {
   const engine = createEngine();
-  const dsl = engine.compile("(c:red or c:white) -o:draw");
+  const { dsl } = engine.compile("(c:red or c:white) -o:draw");
 
   assert.equal(dsl.bool.must.length, 2);
   assert.equal(dsl.bool.must[0].bool.should.length, 2);
   assert.deepEqual(dsl.bool.must[0].bool.should[0], {
     bool: {
       should: [
-        buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
-        buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+        buildContainsColorClause("colors", ["R"]),
+        wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["R"])),
       ],
       minimum_should_match: 1,
     },
@@ -291,8 +295,8 @@ test("supports or groups and negation", () => {
   assert.deepEqual(dsl.bool.must[0].bool.should[1], {
     bool: {
       should: [
-        buildExactColorClause("colors", ["W"], ["U", "B", "R", "G"]),
-        buildExactColorClause("card_faces.colors", ["W"], ["U", "B", "R", "G"]),
+        buildContainsColorClause("colors", ["W"]),
+        wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["W"])),
       ],
       minimum_should_match: 1,
     },
@@ -327,20 +331,21 @@ test("supports runtime custom fields without changing core code", () => {
         aliases: ["ip", "edhrec"],
         esPath: "edhrec.inclusion_percent",
         type: "number",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         parseValue: Number,
         compile: compileNumericField,
       },
     },
   });
 
-  assert.deepEqual(engine.compile("c:red inclusion_percent>1.4"), {
+  assert.deepEqual(engine.compile("c:red inclusion_percent>1.4").dsl, {
     bool: {
       must: [
         {
           bool: {
             should: [
-              buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
-              buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+              buildContainsColorClause("colors", ["R"]),
+              wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["R"])),
             ],
             minimum_should_match: 1,
           },
@@ -362,6 +367,7 @@ test("supports registering and compiling against named profiles", () => {
         esPath: "card.colors",
         esPaths: ["card.colors", "card.card_faces.colors"],
         type: "color-set",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         parseValue: parseColorExpression,
         compile: compileColorField,
       },
@@ -369,6 +375,7 @@ test("supports registering and compiling against named profiles", () => {
         aliases: ["id", "identity"],
         esPath: "card.color_identity",
         type: "color-set",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         parseValue: parseColorExpression,
         compile: compileColorField,
       },
@@ -376,6 +383,7 @@ test("supports registering and compiling against named profiles", () => {
         aliases: ["f", "format"],
         esPath: "card.legalities",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileLegalField,
       },
@@ -383,6 +391,7 @@ test("supports registering and compiling against named profiles", () => {
         aliases: ["frame"],
         esPath: "card.frame",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileKeywordField,
       },
@@ -390,6 +399,7 @@ test("supports registering and compiling against named profiles", () => {
         aliases: ["ip"],
         esPath: "slugs.inclusion_percent",
         type: "number",
+        operators: [":", "=", "!=", ">", ">=", "<", "<="],
         parseValue: Number,
         compile: compileNumericField,
       },
@@ -397,6 +407,7 @@ test("supports registering and compiling against named profiles", () => {
         aliases: ["is"],
         esPath: "is",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileIsShortcutField,
         tokenFieldMap: {
@@ -407,6 +418,7 @@ test("supports registering and compiling against named profiles", () => {
         aliases: ["not"],
         esPath: "not",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileNotShortcutField,
         tokenFieldMap: {
@@ -419,10 +431,10 @@ test("supports registering and compiling against named profiles", () => {
   const profile = { profile: "moxfield_collection" };
   const combined = engine.compile("color<=mardu legal:commander is:legendary frame:2015 inclusion_percent>1", profile);
 
-  assert.deepEqual(combined, {
+  assert.deepEqual(combined.dsl, {
     bool: {
       must: [
-        engine.compile("color<=mardu", profile),
+        engine.compile("color<=mardu", profile).dsl,
         { term: { "card.legalities.commander": "legal" } },
         { term: { "card.type_line": "legendary" } },
         { term: { "card.frame": "2015" } },
@@ -431,26 +443,26 @@ test("supports registering and compiling against named profiles", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("frame:2015", profile), {
+  assert.deepEqual(engine.compile("frame:2015", profile).dsl, {
     term: { "card.frame": "2015" },
   });
 
-  assert.deepEqual(engine.compile("inclusion_percent>1", profile), {
+  assert.deepEqual(engine.compile("inclusion_percent>1", profile).dsl, {
     range: { "slugs.inclusion_percent": { gt: 1 } },
   });
 
-  assert.deepEqual(engine.compile("is:legendary", profile), {
+  assert.deepEqual(engine.compile("is:legendary", profile).dsl, {
     term: { "card.type_line": "legendary" },
   });
 
-  assert.deepEqual(engine.compile("not:legendary", profile), {
+  assert.deepEqual(engine.compile("not:legendary", profile).dsl, {
     bool: {
       must_not: [{ term: { "card.type_line": "legendary" } }],
     },
   });
 });
 
-test("supports compileWithMeta by profile", () => {
+test("supports compile by profile returning dsl and meta", () => {
   const engine = createEngine();
 
   engine.registerProfile("profile_meta", {
@@ -460,6 +472,7 @@ test("supports compileWithMeta by profile", () => {
         aliases: ["is"],
         esPath: "is",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileIsShortcutField,
         tokenFieldMap: {
@@ -470,6 +483,7 @@ test("supports compileWithMeta by profile", () => {
         aliases: ["not"],
         esPath: "not",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileNotShortcutField,
         tokenFieldMap: {
@@ -479,7 +493,7 @@ test("supports compileWithMeta by profile", () => {
     },
   });
 
-  const result = engine.compileWithMeta("is:legendary is:showcase", { profile: "profile_meta" });
+  const result = engine.compile("is:legendary is:showcase", { profile: "profile_meta" });
 
   assert.deepEqual(result.dsl, {
     term: { "card.type_line": "legendary" },
@@ -500,13 +514,14 @@ test("keeps default profile behavior isolated from custom profiles", () => {
         aliases: ["frame"],
         esPath: "card.frame",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileKeywordField,
       },
     },
   });
 
-  assert.deepEqual(engine.compile("frame:2015"), {
+  assert.deepEqual(engine.compile("frame:2015").dsl, {
     bool: {
       should: [
         { term: { frame: "2015" } },
@@ -515,7 +530,7 @@ test("keeps default profile behavior isolated from custom profiles", () => {
       minimum_should_match: 1,
     },
   });
-  assert.deepEqual(engine.compile("frame:2015", { profile: "moxfield_collection" }), {
+  assert.deepEqual(engine.compile("frame:2015", { profile: "moxfield_collection" }).dsl, {
     term: { "card.frame": "2015" },
   });
 });
@@ -531,6 +546,7 @@ test("tracks and validates profile registration", () => {
         aliases: ["profile_frame"],
         esPath: "card.frame",
         type: "keyword",
+        operators: [":", "="],
         parseValue: (value) => String(value).trim().toLowerCase(),
         compile: compileKeywordField,
       },
@@ -570,6 +586,7 @@ test("fails loudly on alias collisions without override", () => {
             aliases: ["c"],
             esPath: "edhrec.inclusion_percent",
             type: "number",
+            operators: [":", "=", "!=", ">", ">=", "<", "<="],
             parseValue: Number,
             compile: compileNumericField,
           },
@@ -595,21 +612,10 @@ test("exposes engine.version metadata", () => {
 test("keeps color and color identity distinct", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("id:esper"), {
-    bool: {
-      must: [
-        { term: { color_identity: "W" } },
-        { term: { color_identity: "U" } },
-        { term: { color_identity: "B" } },
-      ],
-      must_not: [
-        { term: { color_identity: "R" } },
-        { term: { color_identity: "G" } },
-      ],
-    },
-  });
+  // Scryfall parity: id:esper means "fits within esper" (<=), same as id<=esper.
+  assert.deepEqual(engine.compile("id:esper").dsl, engine.compile("id<=esper").dsl);
 
-  const idAzorius = engine.compile("id:azorius");
+  const { dsl: idAzorius } = engine.compile("id:azorius");
   assert.equal(JSON.stringify(idAzorius).includes("card_faces.colors"), false);
   assert.equal(JSON.stringify(idAzorius).includes("\"colors\""), false);
 });
@@ -617,18 +623,18 @@ test("keeps color and color identity distinct", () => {
 test("supports popular color nicknames", () => {
   const engine = createEngine();
   const cases = [
-    ["c:azorius", ["W", "U"], ["B", "R", "G"]],
-    ["c:bant", ["W", "U", "G"], ["B", "R"]],
-    ["c:quandrix", ["U", "G"], ["W", "B", "R"]],
-    ["c:abzan", ["W", "B", "G"], ["U", "R"]],
-    ["c:altruism", ["W", "U", "R", "G"], ["B"]],
+    ["c:azorius", ["W", "U"]],
+    ["c:bant", ["W", "U", "G"]],
+    ["c:quandrix", ["U", "G"]],
+    ["c:abzan", ["W", "B", "G"]],
+    ["c:altruism", ["W", "U", "R", "G"]],
   ];
 
-  for (const [query, required, excluded] of cases) {
-    const dsl = engine.compile(query);
+  for (const [query, required] of cases) {
+    const { dsl } = engine.compile(query);
     assert.equal(dsl.bool.should.length, 2);
-    assert.deepEqual(dsl.bool.should[0], buildExactColorClause("colors", required, excluded));
-    assert.deepEqual(dsl.bool.should[1], buildExactColorClause("card_faces.colors", required, excluded));
+    assert.deepEqual(dsl.bool.should[0], buildContainsColorClause("colors", required));
+    assert.deepEqual(dsl.bool.should[1], wrapNested("card_faces", buildContainsColorClause("card_faces.colors", required)));
     assert.equal(dsl.bool.minimum_should_match, 1);
   }
 });
@@ -636,7 +642,7 @@ test("supports popular color nicknames", () => {
 test("supports colorless semantics for color and identity", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("id:c"), {
+  assert.deepEqual(engine.compile("id:c").dsl, {
     bool: {
       must_not: [
         {
@@ -648,42 +654,25 @@ test("supports colorless semantics for color and identity", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("c:colorless"), {
+  assert.deepEqual(engine.compile("c:colorless").dsl, {
     bool: {
-      must: [
+      must_not: [
         {
-          bool: {
-            must_not: [
-              {
-                exists: {
-                  field: "colors",
-                },
-              },
-            ],
-          },
-        },
-        {
-          bool: {
-            must_not: [
-              {
-                exists: {
-                  field: "card_faces.colors",
-                },
-              },
-            ],
+          exists: {
+            field: "colors",
           },
         },
       ],
     },
   });
 
-  assert.deepEqual(engine.compile("c:c"), engine.compile("c:colorless"));
-  assert.deepEqual(engine.compile("id:colorless"), engine.compile("id:c"));
+  assert.deepEqual(engine.compile("c:c").dsl, engine.compile("c:colorless").dsl);
+  assert.deepEqual(engine.compile("id:colorless").dsl, engine.compile("id:c").dsl);
 });
 
 test("supports color subset comparisons", () => {
   const engine = createEngine();
-  const dsl = engine.compile("id<=esper");
+  const { dsl } = engine.compile("id<=esper");
 
   assert.equal(dsl.bool.should.length, 8);
   assert.equal(dsl.bool.minimum_should_match, 1);
@@ -691,27 +680,27 @@ test("supports color subset comparisons", () => {
 
 test("supports multicolor shorthand", () => {
   const engine = createEngine();
-  const dsl = engine.compile("c:m");
+  const { dsl } = engine.compile("c:m");
 
   assert.equal(dsl.bool.should.length, 2);
   assert.equal(dsl.bool.should[0].bool.should.length, 26);
-  assert.equal(dsl.bool.should[1].bool.should.length, 26);
+  assert.equal(dsl.bool.should[1].nested.query.bool.should.length, 26);
   assert.equal(dsl.bool.minimum_should_match, 1);
 });
 
 test("supports literal multicolor for color and identity", () => {
   const engine = createEngine();
 
-  const colorLiteral = engine.compile("c:multicolor");
-  const colorShorthand = engine.compile("c:m");
+  const { dsl: colorLiteral } = engine.compile("c:multicolor");
+  const { dsl: colorShorthand } = engine.compile("c:m");
   assert.deepEqual(colorLiteral, colorShorthand);
   assert.equal(colorLiteral.bool.should.length, 2);
   assert.equal(colorLiteral.bool.should[0].bool.should.length, 26);
-  assert.equal(colorLiteral.bool.should[1].bool.should.length, 26);
+  assert.equal(colorLiteral.bool.should[1].nested.query.bool.should.length, 26);
   assert.equal(colorLiteral.bool.minimum_should_match, 1);
 
-  const identityLiteral = engine.compile("id:multicolor");
-  const identityShorthand = engine.compile("id:m");
+  const { dsl: identityLiteral } = engine.compile("id:multicolor");
+  const { dsl: identityShorthand } = engine.compile("id:m");
   assert.deepEqual(identityLiteral, identityShorthand);
   assert.equal(identityLiteral.bool.should.length, 26);
   assert.equal(identityLiteral.bool.minimum_should_match, 1);
@@ -720,7 +709,7 @@ test("supports literal multicolor for color and identity", () => {
 test("supports rarity keywords and comparisons", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("r:rare rarity>=rare"), {
+  assert.deepEqual(engine.compile("r:rare rarity>=rare").dsl, {
     bool: {
       must: [
         { term: { rarity: "rare" } },
@@ -743,7 +732,7 @@ test("supports rarity keywords and comparisons", () => {
 test("supports set and collector number lookups", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("set:lea cn:123a cn>=123"), {
+  assert.deepEqual(engine.compile("set:lea cn:123a cn>=123").dsl, {
     bool: {
       must: [
         { term: { set: "lea" } },
@@ -768,13 +757,13 @@ test("supports set and collector number lookups", () => {
 test("supports format legality aliases plus banned and restricted semantics", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("f:modern format:legacy legal:commander banned:historic restricted:vintage"), {
+  assert.deepEqual(engine.compile("f:modern format:legacy legal:commander banned:historic restricted:vintage").dsl, {
     bool: {
       must: [
         { term: { "legalities.modern": "legal" } },
         { term: { "legalities.legacy": "legal" } },
         { term: { "legalities.commander": "legal" } },
-        { term: { "legalities.historic": "not_legal" } },
+        { term: { "legalities.historic": "banned" } },
         { term: { "legalities.vintage": "restricted" } },
       ],
     },
@@ -784,11 +773,11 @@ test("supports format legality aliases plus banned and restricted semantics", ()
 test("supports legality equality operators as direct status checks", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("legal=modern banned=legacy restricted=vintage"), {
+  assert.deepEqual(engine.compile("legal=modern banned=legacy restricted=vintage").dsl, {
     bool: {
       must: [
         { term: { "legalities.modern": "legal" } },
-        { term: { "legalities.legacy": "not_legal" } },
+        { term: { "legalities.legacy": "banned" } },
         { term: { "legalities.vintage": "restricted" } },
       ],
     },
@@ -806,7 +795,7 @@ test("rejects unsupported operators on legality fields", () => {
 test("supports date and year queries against released_at", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("date>=2015-08-18 date<2020-01-01"), {
+  assert.deepEqual(engine.compile("date>=2015-08-18 date<2020-01-01").dsl, {
     bool: {
       must: [
         { range: { released_at: { gte: "2015-08-18" } } },
@@ -815,7 +804,7 @@ test("supports date and year queries against released_at", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("year=1994 year>2001 year>=2001 year<2020 year<=2020"), {
+  assert.deepEqual(engine.compile("year=1994 year>2001 year>=2001 year<2020 year<=2020").dsl, {
     bool: {
       must: [
         buildYearRangeClause("=", 1994),
@@ -827,7 +816,7 @@ test("supports date and year queries against released_at", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("date:2015-08-18 date=2015-08-18 year:1994"), {
+  assert.deepEqual(engine.compile("date:2015-08-18 date=2015-08-18 year:1994").dsl, {
     bool: {
       must: [
         { term: { released_at: "2015-08-18" } },
@@ -850,7 +839,7 @@ test("fails loudly on invalid date and year values", () => {
 test("supports price searches", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("usd:0.5 eur>=1.25 tix<2"), {
+  assert.deepEqual(engine.compile("usd:0.5 eur>=1.25 tix<2").dsl, {
     bool: {
       must: [
         { term: { "prices.usd": 0.5 } },
@@ -864,7 +853,7 @@ test("supports price searches", () => {
 test("supports numeric power and toughness searches via companion fields", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("pow>=3 power=1.5 tou!=2 toughness<=0.5"), {
+  assert.deepEqual(engine.compile("pow>=3 power=1.5 tou!=2 toughness<=0.5").dsl, {
     bool: {
       must: [
         { range: { power_num: { gte: 3 } } },
@@ -886,7 +875,7 @@ test("fails loudly on invalid numeric power/toughness values", () => {
 test("supports not-equals on comparison-style fields", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("mv!=3"), {
+  assert.deepEqual(engine.compile("mv!=3").dsl, {
     bool: {
       must_not: [
         { term: { cmc: 3 } },
@@ -894,7 +883,7 @@ test("supports not-equals on comparison-style fields", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("usd!=1.25 eur!=0.5 tix!=2"), {
+  assert.deepEqual(engine.compile("usd!=1.25 eur!=0.5 tix!=2").dsl, {
     bool: {
       must: [
         { bool: { must_not: [{ term: { "prices.usd": 1.25 } }] } },
@@ -904,7 +893,7 @@ test("supports not-equals on comparison-style fields", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("r!=rare"), {
+  assert.deepEqual(engine.compile("r!=rare").dsl, {
     bool: {
       must_not: [
         { term: { rarity: "rare" } },
@@ -912,7 +901,7 @@ test("supports not-equals on comparison-style fields", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("cn!=123"), {
+  assert.deepEqual(engine.compile("cn!=123").dsl, {
     script: {
       script: {
         lang: "painless",
@@ -925,18 +914,18 @@ test("supports not-equals on comparison-style fields", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("c!=mardu"), {
+  assert.deepEqual(engine.compile("c!=mardu").dsl, {
     bool: {
       must_not: [
-        engine.compile("c=mardu"),
+        engine.compile("c=mardu").dsl,
       ],
     },
   });
 
-  assert.deepEqual(engine.compile("id!=c"), {
+  assert.deepEqual(engine.compile("id!=c").dsl, {
     bool: {
       must_not: [
-        engine.compile("id=c"),
+        engine.compile("id=c").dsl,
       ],
     },
   });
@@ -969,14 +958,14 @@ test("rejects not-equals on keyword, text, control, and shortcut fields", () => 
 test("supports valid mixed queries with not-equals and rejects invalid mixed keyword not-equals", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("c:red mv!=3"), {
+  assert.deepEqual(engine.compile("c:red mv!=3").dsl, {
     bool: {
       must: [
         {
           bool: {
             should: [
-              buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
-              buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+              buildContainsColorClause("colors", ["R"]),
+              wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["R"])),
             ],
             minimum_should_match: 1,
           },
@@ -986,7 +975,7 @@ test("supports valid mixed queries with not-equals and rejects invalid mixed key
     },
   });
 
-  assert.deepEqual(engine.compile("r!=rare unique:cards order:name"), {
+  assert.deepEqual(engine.compile("r!=rare unique:cards order:name").dsl, {
     query: {
       bool: {
         must_not: [
@@ -1011,7 +1000,7 @@ test("supports valid mixed queries with not-equals and rejects invalid mixed key
 
   assert.throws(() => engine.compile("set!=lea unique:cards"), /does not support operator \"!=\"/);
 
-  assert.deepEqual(engine.compile("pow>=3 c:red order:power"), {
+  assert.deepEqual(engine.compile("pow>=3 c:red order:power").dsl, {
     query: {
       bool: {
         must: [
@@ -1019,8 +1008,8 @@ test("supports valid mixed queries with not-equals and rejects invalid mixed key
           {
             bool: {
               should: [
-                buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
-                buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+                buildContainsColorClause("colors", ["R"]),
+                wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["R"])),
               ],
               minimum_should_match: 1,
             },
@@ -1035,24 +1024,24 @@ test("supports valid mixed queries with not-equals and rejects invalid mixed key
 test("supports keywords field aliases", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("kw:Flying"), {
+  assert.deepEqual(engine.compile("kw:Flying").dsl, {
     term: { keywords: "Flying" },
   });
 
-  assert.deepEqual(engine.compile("keyword:Flying"), {
+  assert.deepEqual(engine.compile("keyword:Flying").dsl, {
     term: { keywords: "Flying" },
   });
 
-  assert.deepEqual(engine.compile("keywords:Flying"), {
+  assert.deepEqual(engine.compile("keywords:Flying").dsl, {
     term: { keywords: "Flying" },
   });
 });
 
 test("supports unique result modes", () => {
   const engine = createEngine();
-  const baseQuery = engine.compile("c:red");
+  const { dsl: baseQuery } = engine.compile("c:red");
 
-  assert.deepEqual(engine.compile("unique:cards c:red"), {
+  assert.deepEqual(engine.compile("unique:cards c:red").dsl, {
     query: baseQuery,
     collapse: {
       field: "oracle_id",
@@ -1069,7 +1058,7 @@ test("supports unique result modes", () => {
     ],
   });
 
-  assert.deepEqual(engine.compile("unique:art c:red"), {
+  assert.deepEqual(engine.compile("unique:art c:red").dsl, {
     query: baseQuery,
     collapse: {
       field: "illustration_id",
@@ -1083,13 +1072,16 @@ test("supports unique result modes", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("unique:prints c:red"), baseQuery);
+  assert.deepEqual(engine.compile("unique:prints c:red").dsl, {
+    query: baseQuery,
+    sort: [{ released_at: { order: "asc", unmapped_type: "keyword" } }],
+  });
 });
 
 test("treats bare words as name searches", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("lightning"), {
+  assert.deepEqual(engine.compile("lightning").dsl, {
     ...buildNameLooseClause("lightning"),
   });
 });
@@ -1097,7 +1089,7 @@ test("treats bare words as name searches", () => {
 test("compiles multi-word bare input as weighted name partial/fuzzy search", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("lightning bolt"), {
+  assert.deepEqual(engine.compile("lightning bolt").dsl, {
     bool: {
       must: [
         buildNameLooseClause("lightning"),
@@ -1110,7 +1102,7 @@ test("compiles multi-word bare input as weighted name partial/fuzzy search", () 
 test("compiles quoted name input with match_phrase", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile('"lightning bolt"'), {
+  assert.deepEqual(engine.compile('"lightning bolt"').dsl, {
     match_phrase: {
       name: "lightning bolt",
     },
@@ -1120,14 +1112,14 @@ test("compiles quoted name input with match_phrase", () => {
 test("compiles exact-name bang input as strict keyword disjunction", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("!fire"), buildExactNameBangClause("fire"));
-  assert.deepEqual(engine.compile('!"sift through sands"'), buildExactNameBangClause("sift through sands"));
+  assert.deepEqual(engine.compile("!fire").dsl, buildExactNameBangClause("fire"));
+  assert.deepEqual(engine.compile('!"sift through sands"').dsl, buildExactNameBangClause("sift through sands"));
 });
 
 test("supports negating exact-name bang terms", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("-!fire"), {
+  assert.deepEqual(engine.compile("-!fire").dsl, {
     bool: {
       must_not: [
         buildExactNameBangClause("fire"),
@@ -1139,15 +1131,15 @@ test("supports negating exact-name bang terms", () => {
 test("supports combining exact-name bang with filters and controls", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("!fire c:red"), {
+  assert.deepEqual(engine.compile("!fire c:red").dsl, {
     bool: {
       must: [
         buildExactNameBangClause("fire"),
         {
           bool: {
             should: [
-              buildExactColorClause("colors", ["R"], ["W", "U", "B", "G"]),
-              buildExactColorClause("card_faces.colors", ["R"], ["W", "U", "B", "G"]),
+              buildContainsColorClause("colors", ["R"]),
+              wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["R"])),
             ],
             minimum_should_match: 1,
           },
@@ -1156,7 +1148,7 @@ test("supports combining exact-name bang with filters and controls", () => {
     },
   });
 
-  assert.deepEqual(engine.compile("!fire unique:cards order:name"), {
+  assert.deepEqual(engine.compile("!fire unique:cards order:name").dsl, {
     query: buildExactNameBangClause("fire"),
     collapse: {
       field: "oracle_id",
@@ -1177,7 +1169,7 @@ test("supports combining exact-name bang with filters and controls", () => {
 test("compiles single-word name search with fixed weighted partial/fuzzy clauses", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("factor"), {
+  assert.deepEqual(engine.compile("factor").dsl, {
     ...buildNameLooseClause("factor"),
   });
 });
@@ -1185,9 +1177,9 @@ test("compiles single-word name search with fixed weighted partial/fuzzy clauses
 test("treats name= as include-style name search (not strict term equality)", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("name=jace"), buildNameLooseClause("jace"));
-  assert.deepEqual(engine.compile("n=jace"), buildNameLooseClause("jace"));
-  assert.deepEqual(engine.compile('name="Lightning Bolt"'), {
+  assert.deepEqual(engine.compile("name=jace").dsl, buildNameLooseClause("jace"));
+  assert.deepEqual(engine.compile("n=jace").dsl, buildNameLooseClause("jace"));
+  assert.deepEqual(engine.compile('name="Lightning Bolt"').dsl, {
     match_phrase: {
       name: "Lightning Bolt",
     },
@@ -1197,7 +1189,7 @@ test("treats name= as include-style name search (not strict term equality)", () 
 test("compiles multi-word bare shorthand as name-scoped weighted clauses", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("acad man"), {
+  assert.deepEqual(engine.compile("acad man").dsl, {
     bool: {
       must: [
         buildNameLooseClause("acad"),
@@ -1210,7 +1202,7 @@ test("compiles multi-word bare shorthand as name-scoped weighted clauses", () =>
 test("compiles oracle text search with match + prefix + infix paths", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("o:factor"), {
+  assert.deepEqual(engine.compile("o:factor").dsl, {
     ...buildPartialTextClause(
       [
         "oracle_text",
@@ -1228,7 +1220,7 @@ test("compiles oracle text search with match + prefix + infix paths", () => {
 test("compiles flavor text search with match + prefix + infix paths", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("ft:factory"), {
+  assert.deepEqual(engine.compile("ft:factory").dsl, {
     ...buildPartialTextClause(
       [
         "flavor_text",
@@ -1262,31 +1254,31 @@ test("supports order directives", () => {
   for (const [query, field, expected] of fieldOrderCases) {
     const result = engine.compile(query);
 
-    assert.deepEqual(result.query, { match_all: {} });
-    assert.deepEqual(result.sort[0], { [field]: expected });
+    assert.deepEqual(result.dsl.query, { match_all: {} });
+    assert.deepEqual(result.dsl.sort[0], { [field]: expected });
   }
 
   const rarity = engine.compile("order:rarity");
   const color = engine.compile("order:color");
 
-  assert.deepEqual(rarity.query, { match_all: {} });
-  assert.equal(rarity.sort[0]._script.order, "asc");
-  assert.match(rarity.sort[0]._script.script.source, /rarity/);
+  assert.deepEqual(rarity.dsl.query, { match_all: {} });
+  assert.equal(rarity.dsl.sort[0]._script.order, "asc");
+  assert.match(rarity.dsl.sort[0]._script.script.source, /rarity/);
 
-  assert.deepEqual(color.query, { match_all: {} });
-  assert.equal(color.sort[0]._script.order, "asc");
-  assert.equal(color.sort[0]._script.script.params.field, "colors");
+  assert.deepEqual(color.dsl.query, { match_all: {} });
+  assert.equal(color.dsl.sort[0]._script.order, "asc");
+  assert.equal(color.dsl.sort[0]._script.script.params.field, "colors");
 });
 
 test("supports direction directives", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("order:cmc direction:desc"), {
+  assert.deepEqual(engine.compile("order:cmc direction:desc").dsl, {
     query: { match_all: {} },
     sort: [{ cmc: { order: "desc", unmapped_type: "double" } }],
   });
 
-  assert.deepEqual(engine.compile("order:cmc direction:asc"), {
+  assert.deepEqual(engine.compile("order:cmc direction:asc").dsl, {
     query: { match_all: {} },
     sort: [{ cmc: { order: "asc", unmapped_type: "double" } }],
   });
@@ -1296,17 +1288,17 @@ test("supports lang directive as a preference sort without filtering", () => {
   const engine = createEngine();
 
   const preferredLanguage = engine.compile("lang:ja");
-  assert.deepEqual(preferredLanguage.query, { match_all: {} });
-  assert.equal(preferredLanguage.sort[0]._script.order, "asc");
-  assert.equal(preferredLanguage.sort[0]._script.script.params.field, "lang");
-  assert.equal(preferredLanguage.sort[0]._script.script.params.lang, "ja");
+  assert.deepEqual(preferredLanguage.dsl.query, { match_all: {} });
+  assert.equal(preferredLanguage.dsl.sort[0]._script.order, "asc");
+  assert.equal(preferredLanguage.dsl.sort[0]._script.script.params.field, "lang");
+  assert.equal(preferredLanguage.dsl.sort[0]._script.script.params.lang, "ja");
 
   const withOtherDirectives = engine.compile("lang:es order:name direction:desc prefer:newest");
-  assert.deepEqual(withOtherDirectives.query, { match_all: {} });
-  assert.equal(withOtherDirectives.sort[0]._script.script.params.lang, "es");
-  assert.deepEqual(withOtherDirectives.sort[1], { "name.keyword": { order: "desc", unmapped_type: "keyword" } });
-  assert.deepEqual(withOtherDirectives.sort[2], { released_at: { order: "desc", unmapped_type: "keyword" } });
-  assert.deepEqual(withOtherDirectives.sort[3], {
+  assert.deepEqual(withOtherDirectives.dsl.query, { match_all: {} });
+  assert.equal(withOtherDirectives.dsl.sort[0]._script.script.params.lang, "es");
+  assert.deepEqual(withOtherDirectives.dsl.sort[1], { "name.keyword": { order: "desc", unmapped_type: "keyword" } });
+  assert.deepEqual(withOtherDirectives.dsl.sort[2], { released_at: { order: "desc", unmapped_type: "keyword" } });
+  assert.deepEqual(withOtherDirectives.dsl.sort[3], {
     collector_number: { order: "desc", unmapped_type: "keyword" },
   });
 });
@@ -1316,8 +1308,8 @@ test("supports prefer directives", () => {
 
   const preferredDefault = engine.compile("prefer:default");
 
-  assert.deepEqual(preferredDefault.query, { match_all: {} });
-  assert.deepEqual(preferredDefault.sort, [
+  assert.deepEqual(preferredDefault.dsl.query, { match_all: {} });
+  assert.deepEqual(preferredDefault.dsl.sort, [
     { full_art: { order: "asc", unmapped_type: "boolean" } },
     { promo_types: { order: "asc", unmapped_type: "keyword", missing: "_first" } },
     { frame_effects: { order: "asc", unmapped_type: "keyword", missing: "_first" } },
@@ -1329,7 +1321,7 @@ test("supports prefer directives", () => {
     { collector_number: { order: "desc", unmapped_type: "keyword" } },
   ]);
 
-  assert.deepEqual(engine.compile("prefer:oldest"), {
+  assert.deepEqual(engine.compile("prefer:oldest").dsl, {
     query: { match_all: {} },
     sort: [
       { released_at: { order: "asc", unmapped_type: "keyword" } },
@@ -1337,7 +1329,7 @@ test("supports prefer directives", () => {
     ],
   });
 
-  assert.deepEqual(engine.compile("prefer:newest"), {
+  assert.deepEqual(engine.compile("prefer:newest").dsl, {
     query: { match_all: {} },
     sort: [
       { released_at: { order: "desc", unmapped_type: "keyword" } },
@@ -1345,17 +1337,17 @@ test("supports prefer directives", () => {
     ],
   });
 
-  assert.deepEqual(engine.compile("prefer:usd-low"), {
+  assert.deepEqual(engine.compile("prefer:usd-low").dsl, {
     query: { match_all: {} },
     sort: [{ "prices.usd": { order: "asc", unmapped_type: "double" } }],
   });
 
-  assert.deepEqual(engine.compile("prefer:usd-high"), {
+  assert.deepEqual(engine.compile("prefer:usd-high").dsl, {
     query: { match_all: {} },
     sort: [{ "prices.usd": { order: "desc", unmapped_type: "double" } }],
   });
 
-  assert.deepEqual(engine.compile("prefer:promo"), {
+  assert.deepEqual(engine.compile("prefer:promo").dsl, {
     query: { match_all: {} },
     sort: [
       { promo: { order: "desc", unmapped_type: "boolean" } },
@@ -1363,7 +1355,7 @@ test("supports prefer directives", () => {
     ],
   });
 
-  assert.deepEqual(engine.compile("prefer:ub"), {
+  assert.deepEqual(engine.compile("prefer:ub").dsl, {
     query: { match_all: {} },
     sort: [
       { universes_beyond: { order: "desc", unmapped_type: "boolean" } },
@@ -1371,7 +1363,7 @@ test("supports prefer directives", () => {
     ],
   });
 
-  assert.deepEqual(engine.compile("prefer:notub"), {
+  assert.deepEqual(engine.compile("prefer:notub").dsl, {
     query: { match_all: {} },
     sort: [
       { universes_beyond: { order: "asc", unmapped_type: "boolean" } },
@@ -1380,15 +1372,15 @@ test("supports prefer directives", () => {
   });
 
   const atypical = engine.compile("prefer:atypical");
-  assert.deepEqual(atypical.query, { match_all: {} });
-  assert.equal(atypical.sort[0]._script.order, "desc");
-  assert.match(atypical.sort[0]._script.script.source, /promo/);
+  assert.deepEqual(atypical.dsl.query, { match_all: {} });
+  assert.equal(atypical.dsl.sort[0]._script.order, "desc");
+  assert.match(atypical.dsl.sort[0]._script.script.source, /promo/);
 });
 
 test("supports is: token cross-reference matching", () => {
   const engine = createEngine();
 
-  const result = engine.compile('is:etched name:"Lightning Bolt"');
+  const { dsl: result } = engine.compile('is:etched name:"Lightning Bolt"');
 
   assert.deepEqual(result.bool.must[1], { match_phrase: { name: "Lightning Bolt" } });
   assert.deepEqual(result.bool.must[0], {
@@ -1405,24 +1397,18 @@ test("supports is: token cross-reference matching", () => {
 test("supports is:commander semantic shortcut without coupling generic is: to legality", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("is:commander"), {
+  assert.deepEqual(engine.compile("is:commander").dsl, {
     bool: {
       should: [
         {
           bool: {
             must: [
-              {
-                bool: {
-                  must_not: [
-                    { term: { "legalities.commander": "banned" } },
-                  ],
-                },
-              },
+              { term: { "legalities.commander": "legal" } },
               {
                 bool: {
                   should: [
                     { match: { type_line: { query: "legendary", operator: "and" } } },
-                    { match: { "card_faces.type_line": { query: "legendary", operator: "and" } } },
+                    wrapNested("card_faces", { match: { "card_faces.type_line": { query: "legendary", operator: "and" } } }),
                   ],
                   minimum_should_match: 1,
                 },
@@ -1431,9 +1417,9 @@ test("supports is:commander semantic shortcut without coupling generic is: to le
                 bool: {
                   should: [
                     { match: { type_line: { query: "artifact", operator: "and" } } },
-                    { match: { "card_faces.type_line": { query: "artifact", operator: "and" } } },
+                    wrapNested("card_faces", { match: { "card_faces.type_line": { query: "artifact", operator: "and" } } }),
                     { match: { type_line: { query: "creature", operator: "and" } } },
-                    { match: { "card_faces.type_line": { query: "creature", operator: "and" } } },
+                    wrapNested("card_faces", { match: { "card_faces.type_line": { query: "creature", operator: "and" } } }),
                   ],
                   minimum_should_match: 1,
                 },
@@ -1447,7 +1433,7 @@ test("supports is:commander semantic shortcut without coupling generic is: to le
           bool: {
             should: [
               { match_phrase: { oracle_text: "can be your commander" } },
-              { match_phrase: { "card_faces.oracle_text": "can be your commander" } },
+              wrapNested("card_faces", { match_phrase: { "card_faces.oracle_text": "can be your commander" } }),
             ],
             minimum_should_match: 1,
           },
@@ -1458,10 +1444,76 @@ test("supports is:commander semantic shortcut without coupling generic is: to le
   });
 });
 
+test("supports is:spell semantic shortcut type-line disjunction including battle", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:spell").dsl, {
+    bool: {
+      should: [
+        { match: { type_line: { query: "creature", operator: "and" } } },
+        { match: { type_line: { query: "artifact", operator: "and" } } },
+        { match: { type_line: { query: "instant", operator: "and" } } },
+        { match: { type_line: { query: "sorcery", operator: "and" } } },
+        { match: { type_line: { query: "enchantment", operator: "and" } } },
+        { match: { type_line: { query: "planeswalker", operator: "and" } } },
+        { match: { type_line: { query: "battle", operator: "and" } } },
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "creature", operator: "and" } } }),
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "artifact", operator: "and" } } }),
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "instant", operator: "and" } } }),
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "sorcery", operator: "and" } } }),
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "enchantment", operator: "and" } } }),
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "planeswalker", operator: "and" } } }),
+        wrapNested("card_faces", { match: { "card_faces.type_line": { query: "battle", operator: "and" } } }),
+      ],
+      minimum_should_match: 1,
+    },
+  });
+
+  const meta = engine.compile("is:spell");
+  assert.deepEqual(meta.meta.terms.valid, ["is:spell"]);
+  assert.deepEqual(meta.meta.terms.invalid, []);
+});
+
+test("supports not:spell semantic negation of is:spell disjunction", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("not:spell").dsl, {
+    bool: {
+      must_not: [
+        {
+          bool: {
+            should: [
+              { match: { type_line: { query: "creature", operator: "and" } } },
+              { match: { type_line: { query: "artifact", operator: "and" } } },
+              { match: { type_line: { query: "instant", operator: "and" } } },
+              { match: { type_line: { query: "sorcery", operator: "and" } } },
+              { match: { type_line: { query: "enchantment", operator: "and" } } },
+              { match: { type_line: { query: "planeswalker", operator: "and" } } },
+              { match: { type_line: { query: "battle", operator: "and" } } },
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "creature", operator: "and" } } }),
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "artifact", operator: "and" } } }),
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "instant", operator: "and" } } }),
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "sorcery", operator: "and" } } }),
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "enchantment", operator: "and" } } }),
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "planeswalker", operator: "and" } } }),
+              wrapNested("card_faces", { match: { "card_faces.type_line": { query: "battle", operator: "and" } } }),
+            ],
+            minimum_should_match: 1,
+          },
+        },
+      ],
+    },
+  });
+
+  const meta = engine.compile("not:spell");
+  assert.deepEqual(meta.meta.terms.valid, ["not:spell"]);
+  assert.deepEqual(meta.meta.terms.invalid, []);
+});
+
 test("supports not: token cross-reference matching", () => {
   const engine = createEngine();
 
-  const result = engine.compile('lightning not:showcase');
+  const { dsl: result } = engine.compile('lightning not:showcase');
 
   assert.equal(result.bool.must.length, 2);
   assert.deepEqual(result.bool.must[0], buildNameLooseClause("lightning"));
@@ -1477,7 +1529,7 @@ test("supports not: token cross-reference matching", () => {
 test("supports st, border, and frame field aliases", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("st:masterpiece -border:borderless -frame:future"), {
+  assert.deepEqual(engine.compile("st:masterpiece -border:borderless -frame:future").dsl, {
     bool: {
       must: [
         { term: { set_type: "masterpiece" } },
@@ -1511,7 +1563,7 @@ test("supports st, border, and frame field aliases", () => {
 test("supports is:default shortcut expansion", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("is:default"), {
+  assert.deepEqual(engine.compile("is:default").dsl, {
     bool: {
       must: [
         { bool: { must_not: [{ term: { frame_effects: "showcase" } }] } },
@@ -1584,18 +1636,18 @@ test("supports is:default shortcut expansion", () => {
   });
 });
 
-test("compileWithMeta treats is:default as a valid shortcut", () => {
+test("compile treats is:default as a valid shortcut", () => {
   const engine = createEngine();
-  const result = engine.compileWithMeta("is:default");
+  const result = engine.compile("is:default");
 
   assert.deepEqual(result.meta.terms.valid, ["is:default"]);
   assert.deepEqual(result.meta.terms.invalid, []);
   assert.equal(result.meta.warnings.length, 0);
 });
 
-test("compileWithMeta treats is:commander as a valid semantic shortcut", () => {
+test("compile treats is:commander as a valid semantic shortcut", () => {
   const engine = createEngine();
-  const result = engine.compileWithMeta("is:commander");
+  const result = engine.compile("is:commander");
 
   assert.deepEqual(result.meta.terms.valid, ["is:commander"]);
   assert.deepEqual(result.meta.terms.invalid, []);
@@ -1681,7 +1733,7 @@ test("supports individual is:default atoms", () => {
   ];
 
   for (const [query, expected] of cases) {
-    assert.deepEqual(engine.compile(query), expected);
+    assert.deepEqual(engine.compile(query).dsl, expected);
   }
 });
 
@@ -1689,7 +1741,7 @@ test("supports combined is:default atoms across same and different fields", () =
   const engine = createEngine();
 
   assert.deepEqual(
-    engine.compile("not:extendedart not:fullart -frame:future -frame:colorshifted not:stamped -border:borderless"),
+    engine.compile("not:extendedart not:fullart -frame:future -frame:colorshifted not:stamped -border:borderless").dsl,
     {
       bool: {
         must: [
@@ -1737,7 +1789,7 @@ test("combines is:default atoms with unique/order/prefer controls", () => {
   const engine = createEngine();
 
   assert.deepEqual(
-    engine.compile("not:extendedart -border:borderless unique:cards order:usd direction:desc prefer:newest"),
+    engine.compile("not:extendedart -border:borderless unique:cards order:usd direction:desc prefer:newest").dsl,
     {
       query: {
         bool: {
@@ -1772,7 +1824,7 @@ test("applies last control values when combining repeated controls with atoms", 
   assert.deepEqual(
     engine.compile(
       "not:extendedart unique:cards unique:art order:name order:cmc direction:desc direction:asc prefer:oldest prefer:promo"
-    ),
+    ).dsl,
     {
       query: {
         bool: {
@@ -1798,10 +1850,10 @@ test("applies last control values when combining repeated controls with atoms", 
   );
 });
 
-test("compileWithMeta returns valid and invalid is/not terms", () => {
+test("compile returns valid and invalid is/not terms in meta", () => {
   const engine = createEngine();
 
-  const result = engine.compileWithMeta("is:rare is:bibbityboppityboo");
+  const result = engine.compile("is:rare is:bibbityboppityboo");
 
   assert.deepEqual(result.dsl, {
     term: { rarity: "rare" },
@@ -1815,13 +1867,13 @@ test("compileWithMeta returns valid and invalid is/not terms", () => {
 test("compile skips unknown is/not token without throwing", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile("is:bibbityboppityboo"), { match_all: {} });
+  assert.deepEqual(engine.compile("is:bibbityboppityboo").dsl, { match_all: {} });
 });
 
 test("combines unique:cards with not: shortcuts and directives", () => {
   const engine = createEngine();
 
-  const result = engine.compile("lightning unique:cards not:showcase");
+  const { dsl: result } = engine.compile("lightning unique:cards not:showcase");
 
   assert.deepEqual(result.collapse, {
     field: "oracle_id",
@@ -1849,7 +1901,7 @@ test("combines unique:cards with not: shortcuts and directives", () => {
 test("combines unique:cards with prefer:default and keeps name sorting", () => {
   const engine = createEngine();
 
-  const result = engine.compile("lightning unique:cards not:showcase prefer:default");
+  const { dsl: result } = engine.compile("lightning unique:cards not:showcase prefer:default");
 
   assert.deepEqual(result.aggs, {
     collapsed_total: {
@@ -1924,22 +1976,44 @@ test("parses exact-name bang terms as non-merged name terms", () => {
 test("keeps boolean keywords literal inside quoted values", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile('o:"choose one or both" name:"Fire and Ice"'), {
+  assert.deepEqual(engine.compile('o:"choose one or both" name:"Fire and Ice"').dsl, {
     bool: {
       must: [
-        buildPartialTextClause(
-          [
-            "oracle_text",
-            "oracle_text.prefix",
-            "oracle_text.infix",
-            "card_faces.oracle_text",
-            "card_faces.oracle_text.prefix",
-            "card_faces.oracle_text.infix",
-          ],
-          "choose one or both"
-        ),
+        {
+          bool: {
+            should: [
+              { match_phrase: { oracle_text: "choose one or both" } },
+              wrapNested("card_faces", { match_phrase: { "card_faces.oracle_text": "choose one or both" } }),
+            ],
+            minimum_should_match: 1,
+          },
+        },
         { match_phrase: { name: "Fire and Ice" } },
       ],
+    },
+  });
+});
+
+test("compiles quoted oracle/flavor text as match_phrase", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile('o:"draw a card"').dsl, {
+    bool: {
+      should: [
+        { match_phrase: { oracle_text: "draw a card" } },
+        wrapNested("card_faces", { match_phrase: { "card_faces.oracle_text": "draw a card" } }),
+      ],
+      minimum_should_match: 1,
+    },
+  });
+
+  assert.deepEqual(engine.compile('ft:"some flavor phrase"').dsl, {
+    bool: {
+      should: [
+        { match_phrase: { flavor_text: "some flavor phrase" } },
+        wrapNested("card_faces", { match_phrase: { "card_faces.flavor_text": "some flavor phrase" } }),
+      ],
+      minimum_should_match: 1,
     },
   });
 });
@@ -1947,18 +2021,14 @@ test("keeps boolean keywords literal inside quoted values", () => {
 test("unescapes escaped quotes inside quoted values", () => {
   const engine = createEngine();
 
-  assert.deepEqual(engine.compile('o:"Whenever a card says \\"draw\\"..."'), {
-    ...buildPartialTextClause(
-      [
-        "oracle_text",
-        "oracle_text.prefix",
-        "oracle_text.infix",
-        "card_faces.oracle_text",
-        "card_faces.oracle_text.prefix",
-        "card_faces.oracle_text.infix",
+  assert.deepEqual(engine.compile('o:"Whenever a card says \\"draw\\"..."').dsl, {
+    bool: {
+      should: [
+        { match_phrase: { oracle_text: 'Whenever a card says "draw"...' } },
+        wrapNested("card_faces", { match_phrase: { "card_faces.oracle_text": 'Whenever a card says "draw"...' } }),
       ],
-      'Whenever a card says "draw"...'
-    ),
+      minimum_should_match: 1,
+    },
   });
 });
 
@@ -1982,5 +2052,265 @@ test("fails on unsupported exact-name bang forms", () => {
   assert.throws(
     () => engine.parse("!"),
     /Exact-name bang term is missing a value/
+  );
+});
+
+test("rejects order:oldest and order:newest as invalid order values", () => {
+  const engine = createEngine();
+
+  assert.throws(
+    () => engine.compile("order:oldest"),
+    /Unknown order expression "oldest"/
+  );
+  assert.throws(
+    () => engine.compile("order:newest"),
+    /Unknown order expression "newest"/
+  );
+});
+
+test("rejects invalid esPath characters on field registration", () => {
+  const engine = createEngine();
+
+  assert.throws(
+    () => engine.registerField("bad_field", {
+      esPath: "a b",
+      compile: () => ({ match_all: {} }),
+    }),
+    /contains invalid characters/
+  );
+
+  assert.throws(
+    () => engine.registerField("bad_field2", {
+      esPath: "a;b",
+      compile: () => ({ match_all: {} }),
+    }),
+    /contains invalid characters/
+  );
+});
+
+test("compile always returns dsl and meta", () => {
+  const engine = createEngine();
+
+  const result = engine.compile("c:red");
+
+  assert.ok(Object.prototype.hasOwnProperty.call(result, "dsl"));
+  assert.ok(Object.prototype.hasOwnProperty.call(result, "meta"));
+  assert.ok(Object.prototype.hasOwnProperty.call(result.meta, "terms"));
+  assert.ok(Object.prototype.hasOwnProperty.call(result.meta, "warnings"));
+
+  const emptyResult = engine.compile("is:foo");
+  assert.deepEqual(emptyResult.dsl, { match_all: {} });
+  assert.deepEqual(emptyResult.meta.terms.valid, []);
+  assert.deepEqual(emptyResult.meta.terms.invalid, ["is:foo"]);
+  assert.equal(emptyResult.meta.warnings.length, 1);
+});
+
+test("supports game: and in: fields for game environment filtering", () => {
+  const engine = createEngine();
+
+  // game: and in: are aliases — both search the games array field
+  assert.deepEqual(engine.compile("game:paper").dsl, { term: { games: "paper" } });
+  assert.deepEqual(engine.compile("in:paper").dsl, { term: { games: "paper" } });
+  assert.deepEqual(engine.compile("game:mtgo").dsl, { term: { games: "mtgo" } });
+  assert.deepEqual(engine.compile("in:mtgo").dsl, { term: { games: "mtgo" } });
+  assert.deepEqual(engine.compile("game:arena").dsl, { term: { games: "arena" } });
+  assert.deepEqual(engine.compile("in:arena").dsl, { term: { games: "arena" } });
+
+  // combined game filter
+  assert.deepEqual(engine.compile("in:paper in:arena").dsl, {
+    bool: {
+      must: [
+        { term: { games: "paper" } },
+        { term: { games: "arena" } },
+      ],
+    },
+  });
+});
+
+test("paper/mtgo/arena are no longer valid is: tokens", () => {
+  const engine = createEngine();
+
+  // These were previously (incorrectly) searchable via is: — they must now be invalid
+  const paperResult = engine.compile("is:paper");
+  assert.deepEqual(paperResult.dsl, { match_all: {} });
+  assert.deepEqual(paperResult.meta.terms.invalid, ["is:paper"]);
+
+  const mtgoResult = engine.compile("is:mtgo");
+  assert.deepEqual(mtgoResult.dsl, { match_all: {} });
+  assert.deepEqual(mtgoResult.meta.terms.invalid, ["is:mtgo"]);
+});
+
+test("supports is:digital as shorthand for mtgo or arena game environment", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:digital").dsl, {
+    bool: {
+      should: [
+        { term: { games: "mtgo" } },
+        { term: { games: "arena" } },
+      ],
+      minimum_should_match: 1,
+    },
+  });
+
+  const result = engine.compile("is:digital");
+  assert.deepEqual(result.meta.terms.valid, ["is:digital"]);
+  assert.deepEqual(result.meta.terms.invalid, []);
+});
+
+test("supports is:promo against the promo boolean field", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:promo").dsl, { term: { promo: true } });
+
+  const result = engine.compile("is:promo");
+  assert.deepEqual(result.meta.terms.valid, ["is:promo"]);
+  assert.deepEqual(result.meta.terms.invalid, []);
+});
+
+test("supports is:spotlight against the story_spotlight boolean field", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("is:spotlight").dsl, { term: { story_spotlight: true } });
+
+  const result = engine.compile("is:spotlight");
+  assert.deepEqual(result.meta.terms.valid, ["is:spotlight"]);
+  assert.deepEqual(result.meta.terms.invalid, []);
+});
+
+test("is:alchemy and is:rebalanced search promo_types only (not set_type)", () => {
+  const engine = createEngine();
+
+  // is:alchemy → { term: { promo_types: "alchemy" } }, NOT set_type
+  const alchemyResult = engine.compile("is:alchemy");
+  assert.deepEqual(alchemyResult.dsl, { term: { promo_types: "alchemy" } });
+
+  // is:rebalanced → { term: { promo_types: "rebalanced" } }
+  const rebalancedResult = engine.compile("is:rebalanced");
+  assert.deepEqual(rebalancedResult.dsl, { term: { promo_types: "rebalanced" } });
+
+  // st:alchemy still works for set_type
+  assert.deepEqual(engine.compile("st:alchemy").dsl, { term: { set_type: "alchemy" } });
+});
+
+test("is:promo and st:promo remain distinct", () => {
+  const engine = createEngine();
+
+  // is:promo → boolean field (promo: true)
+  assert.deepEqual(engine.compile("is:promo").dsl, { term: { promo: true } });
+
+  // st:promo → REMOVED from set_type; promo is not a valid set_type anymore for is:
+  // (st:promo itself still works as a direct keyword field lookup)
+  // st:promo tests the set_type field directly — this is unchanged behavior
+  assert.deepEqual(engine.compile("st:promo").dsl, { term: { set_type: "promo" } });
+});
+
+test("registerField accepts valid ES field names including @ and hyphens", () => {
+  const engine = createEngine();
+
+  // @timestamp — common in ECS-compliant Elasticsearch indexes
+  assert.doesNotThrow(() =>
+    engine.registerField("timestamp", {
+      esPath: "@timestamp",
+      type: "keyword",
+      operators: [":", "="],
+      compile: compileKeywordField,
+    })
+  );
+
+  // hyphenated field name
+  assert.doesNotThrow(() =>
+    engine.registerField("event_type", {
+      esPath: "event-type",
+      type: "keyword",
+      operators: [":", "="],
+      compile: compileKeywordField,
+    })
+  );
+
+  // labels.env (dots still work)
+  assert.doesNotThrow(() =>
+    engine.registerField("env_label", {
+      esPath: "labels.env",
+      type: "keyword",
+      operators: [":", "="],
+      compile: compileKeywordField,
+    })
+  );
+});
+
+test("registerField rejects invalid esPath characters", () => {
+  const engine = createEngine();
+
+  // whitespace
+  assert.throws(
+    () => engine.registerField("bad_field", {
+      esPath: "a b",
+      operators: [":", "="],
+      compile: compileKeywordField,
+    }),
+    /contains invalid characters/
+  );
+
+  // semicolon
+  assert.throws(
+    () => engine.registerField("bad_field2", {
+      esPath: "a;b",
+      operators: [":", "="],
+      compile: compileKeywordField,
+    }),
+    /contains invalid characters/
+  );
+});
+
+test("registerField rejects missing or empty operators array for non-control fields", () => {
+  const engine = createEngine();
+
+  // no operators property
+  assert.throws(
+    () => engine.registerField("no_operators", {
+      esPath: "some.field",
+      compile: compileKeywordField,
+    }),
+    /must define a non-empty "operators" array/
+  );
+
+  // empty operators array
+  assert.throws(
+    () => engine.registerField("empty_operators", {
+      esPath: "some.field",
+      operators: [],
+      compile: compileKeywordField,
+    }),
+    /must define a non-empty "operators" array/
+  );
+});
+
+test("user-facing docs do not reference removed compileWithMeta API", () => {
+  // compile() now always returns { dsl, meta }. compileWithMeta() no longer exists.
+  // This test prevents doc rot: if compileWithMeta reappears in user docs after
+  // being deliberately removed, this test fails and forces a conscious decision.
+  const docsDir = join(import.meta.dirname, "..", "docs");
+  const rootDir = join(import.meta.dirname, "..");
+  const rootDocs = ["README.md"];
+  const subDocs = readdirSync(docsDir).filter((f) => f.endsWith(".md") && f !== "session-handoff.md");
+
+  const filesToCheck = [
+    ...rootDocs.map((f) => join(rootDir, f)),
+    ...subDocs.map((f) => join(docsDir, f)),
+  ];
+
+  const violations = [];
+  for (const filePath of filesToCheck) {
+    const content = readFileSync(filePath, "utf8");
+    if (content.includes("compileWithMeta")) {
+      violations.push(filePath.replace(rootDir + "/", ""));
+    }
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    `The following docs still reference the removed compileWithMeta() API: ${violations.join(", ")}`
   );
 });
