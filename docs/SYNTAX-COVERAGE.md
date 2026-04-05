@@ -4,6 +4,9 @@ This document compares the current `scryfall-query-dsl` implementation against t
 
 Status is based on the current source implementation, not on intended future behavior.
 
+> [!Note]
+> Current supported keywords available at [https://jnovack.github.io/scryfall-query-dsl/](https://jnovack.github.io/scryfall-query-dsl/)
+
 ## Summary
 
 This project currently supports a small but useful subset of Scryfall-style syntax:
@@ -45,18 +48,18 @@ This tracker mirrors the section order from `https://scryfall.com/docs/syntax` s
 | Format Legality | Supported | `f` / `format` / `legal` compile to `legalities.<format> = legal`; `banned` compiles to `not_legal`; `restricted` compiles to `restricted`. |
 | USD/EUR/TIX Prices | Supported | `usd`, `eur`, and `tix` numeric comparisons are supported. |
 | Artist/Flavor/Watermark | Partial | `ft` / `flavor` is implemented. Artist/watermark families remain unsupported. |
-| Border/Frame/Foil/Resolution | Partial | `border:` and `frame:` field searches are supported; `frame` matches both `frame` and `frame_effects`; broader foil/stamp/resolution families still rely on partial shortcut coverage. |
-| Games, Promos, & Spotlights | Partial | Some relevant token matching exists via `is:` / `not:` cross-reference fields. |
+| Border/Frame/Foil/Resolution | Partial | `border:` and `frame:` field searches are supported; `frame` matches both `frame` and `frame_effects`; `is:foil` and `is:nonfoil` are supported; `is:hires` and `stamp:` remain unsupported. |
+| Games, Promos, & Spotlights | Supported | `game:` / `in:` are supported, and shortcut semantics include `is:digital`, `is:promo`, and `is:spotlight`. |
 | Year | Supported | `year` comparisons are implemented against `released_at`; `date` comparisons are also implemented. |
 | Reprints | Unsupported | Not implemented as built-ins yet. |
 | Languages | Partial | `lang` / `language` preference sorting is implemented; broader language syntax (`lang:any`, `new:language`, `in:*`) is still unsupported. |
 | Shortcuts and Nicknames | Partial | `is:` / `not:` shortcut token matching exists but does not yet cover full Scryfall semantics. |
-| Negating Conditions | Partial | `-` negation works broadly; full `-field:value` parity work is in progress. |
+| Negating Conditions | Supported | `-` negation is supported for terms and grouped clauses. |
 | Regular Expressions | Unsupported | Not implemented. |
 | Exact Names | Partial | Bare exact-name bang syntax is implemented (`!fire`, `!"sift through sands"`). Fielded bang forms are still unsupported. |
 | Using OR | Supported | `or` with grouped boolean compilation is implemented. |
 | Nesting Conditions | Supported | Parentheses and nested groups are implemented. |
-| Display Keywords | Unsupported | Not implemented. |
+| Display Keywords | Supported | `unique`, `order`, `prefer`, and `direction` are implemented as display/search controls. |
 
 ## Fully Supported
 
@@ -72,7 +75,7 @@ These features are implemented in the parser and compiler today.
 | Quoted string values | Fully supported | Double-quoted field values may contain spaces, parentheses, and the words `and` / `or`. Escaped quotes with `\"` are unescaped before compilation. Quoted name searches compile to `match_phrase`. | `name:"Lightning Bolt"`, `"lightning bolt"` |
 | Numeric comparisons | Fully supported | `>`, `>=`, `<`, `<=`, `=`, `:` work for fields configured with numeric compilers. | `mv<=3`, `mv>5` |
 | Basic field operators | Fully supported | `:`, `=`, `!=`, `>`, `>=`, `<`, `<=` are accepted by the parser. Field definitions decide which are legal. Quoted values work with both `:` and `=`. | `t:dragon`, `name="Lightning Bolt"`, `mv!=3` |
-| `is:` / `not:` token shortcuts | Fully supported (for configured fields) | Tokens are cross-referenced against configured keyword fields (`frame_effects`, `promo_types`, `set_type`, `rarity`, `layout`, `image_status`, `games`, `finishes`, `all_parts.component`). `is:` compiles as OR across matched fields; `not:` compiles as exclusion across matched fields. `is:default` expands to an explicit maintained atom list. `is:commander` is implemented as a dedicated semantic shortcut and does not change generic `is:` legality behavior. Unknown tokens are skipped and reported via `compileWithMeta()`. | `is:rare`, `is:showcase`, `not:playtest`, `not:etched`, `is:default`, `is:commander` |
+| `is:` / `not:` token shortcuts | Fully supported (for configured fields) | Tokens are cross-referenced against configured keyword fields (`frame_effects`, `promo_types`, `set_type`, `rarity`, `layout`, `image_status`, `games`, `finishes`, `all_parts.component`). `is:` compiles as OR across matched fields; `not:` compiles as exclusion across matched fields. `is:default` expands to an explicit maintained atom list. `is:commander` is implemented as a dedicated semantic shortcut and does not change generic `is:` legality behavior. Unknown tokens are skipped and reported in `compile().meta.terms.invalid`. | `is:rare`, `is:showcase`, `not:playtest`, `not:etched`, `is:default`, `is:commander` |
 | Rarity | Fully supported | `r` / `rarity` match ordered rarity keywords and support comparison operators over `common`, `uncommon`, `rare`, `mythic`, `special`, and `bonus`. | `r:rare`, `rarity>=rare` |
 | Set code | Fully supported | `set` matches Scryfall set codes as a keyword field. | `set:lea` |
 | Format legality | Fully supported | `f` / `format` / `legal` compile to `legalities.<format> = legal`; `banned` compiles to `legalities.<format> = not_legal`; `restricted` compiles to `legalities.<format> = restricted`. Supported operators: `:` and `=`. | `f:modern`, `format:commander`, `legal:pioneer`, `banned:legacy`, `restricted:vintage` |
@@ -126,8 +129,7 @@ The following syntax areas from the Scryfall syntax reference are currently unsu
 | Commander/companion/reserved-list shortcuts | `is:companion`, `is:reserved` |
 | Price queries beyond the built-in price fields | `cheapest:usd` |
 | Artist, watermark, art counts | `a:"proce"`, `wm:orzhov`, `artists>1`, `illustrations>1` |
-| Border/frame families beyond basic fielded matching | `is:foil`, `stamp:acorn`, `is:hires` |
-| Game and platform availability | `game:arena`, `in:mtgo`, `is:digital`, `is:promo`, `is:spotlight` |
+| Border/frame families beyond current support | `stamp:acorn`, `is:hires` |
 | Tagger tags | `art:squirrel`, `function:removal`, `otag:removal` |
 | Reprint and print-count syntax | `is:reprint`, `not:reprint`, `sets>=20`, `papersets=1` |
 | Language syntax beyond `lang` preference sorting | `lang:any`, `new:language`, `in:ru` |
@@ -196,7 +198,7 @@ These are the most important behavior differences even within superficially simi
    Matching language prints are sorted ahead of others; non-matching languages are still returned.
 
 12. Unknown `is:` / `not:` tokens are intentionally non-fatal.
-   They are skipped from DSL and surfaced through `compileWithMeta().meta`.
+   They are skipped from DSL and surfaced through `compile().meta.terms.invalid` and `compile().meta.warnings`.
 
 13. `keyword:` currently maps to the built-in `keywords` field alias.
    This is an exact `term` lookup on `keywords`, not full Scryfall keyword-ability search semantics.
@@ -228,7 +230,6 @@ Major missing areas:
 - `has:` / `include:` families
 - mana syntax
 - power/toughness cross-field math and loyalty syntax
-- remaining display keywords
 
 See `docs/SYNTAX-COVERAGE.md` for the authoritative breakdown.
 
@@ -259,9 +260,8 @@ When `collapse` is active (`unique:cards` / `unique:art`), `aggs.collapsed_total
 `unique:cards` applies an implicit ascending `name` sort when no explicit `order:` is supplied.
 `lang:xx` ranks matching `lang` values first via sort without filtering out non-matching language prints.
 
-`compileWithMeta()` is available for graceful `is:` / `not:` handling:
+`compile()` always returns `{ dsl, meta }` for graceful `is:` / `not:` handling:
 
-- returns `{ dsl, meta }`
 - `meta.terms.valid` includes successfully compiled full terms (for example `is:rare`)
 - `meta.terms.invalid` includes skipped unknown full terms (for example `is:bibbityboppityboo`)
 - `meta.warnings` includes `UNKNOWN_IS_NOT_TOKEN` entries

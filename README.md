@@ -14,6 +14,8 @@ It is designed for browser-based tools, private/internal web apps, and custom MT
 
 ## Quick Start
 
+Current supported keywords available at [https://jnovack.github.io/scryfall-query-dsl/](https://jnovack.github.io/scryfall-query-dsl/)
+
 ### Install
 
 ```bash
