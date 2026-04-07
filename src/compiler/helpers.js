@@ -982,6 +982,7 @@ export function createScriptSort(source, params, direction = "asc") {
 // can remap the same behavior to alternate profile layouts.
 export function createDefaultPrintingSorts(fields = {}) {
   const {
+    promo = "promo",
     fullArt = "full_art",
     promoTypes = "promo_types",
     frameEffects = "frame_effects",
@@ -994,6 +995,7 @@ export function createDefaultPrintingSorts(fields = {}) {
   } = fields;
 
   return [
+    createFieldSort(promo, "asc", { unmapped_type: "boolean" }),
     createFieldSort(fullArt, "asc", { unmapped_type: "boolean" }),
     createFieldSort(promoTypes, "asc", { unmapped_type: "keyword", missing: "_first" }),
     createFieldSort(frameEffects, "asc", { unmapped_type: "keyword", missing: "_first" }),

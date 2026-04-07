@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.1+3f372f7 | built 2026-04-05T19:14:30.731Z */
+/* scryfall-query-dsl v0.2.0-rc.1+6404f6a | built 2026-04-06T23:14:05.344Z */
 var ScryfallQueryDSL = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -820,6 +820,7 @@ var ScryfallQueryDSL = (() => {
   }
   function createDefaultPrintingSorts(fields = {}) {
     const {
+      promo = "promo",
       fullArt = "full_art",
       promoTypes = "promo_types",
       frameEffects = "frame_effects",
@@ -831,6 +832,7 @@ var ScryfallQueryDSL = (() => {
       collectorNumber = "collector_number"
     } = fields;
     return [
+      createFieldSort(promo, "asc", { unmapped_type: "boolean" }),
       createFieldSort(fullArt, "asc", { unmapped_type: "boolean" }),
       createFieldSort(promoTypes, "asc", { unmapped_type: "keyword", missing: "_first" }),
       createFieldSort(frameEffects, "asc", { unmapped_type: "keyword", missing: "_first" }),
@@ -1211,6 +1213,7 @@ var ScryfallQueryDSL = (() => {
     langField: "lang",
     prefer: {
       defaultPrintingSortFields: {
+        promo: "promo",
         fullArt: "full_art",
         promoTypes: "promo_types",
         frameEffects: "frame_effects",
@@ -1266,6 +1269,7 @@ var ScryfallQueryDSL = (() => {
       langField: prefixPath(baseConfig.langField, prefix),
       prefer: {
         defaultPrintingSortFields: {
+          promo: prefixPath(baseConfig.prefer.defaultPrintingSortFields.promo, prefix),
           fullArt: prefixPath(baseConfig.prefer.defaultPrintingSortFields.fullArt, prefix),
           promoTypes: prefixPath(baseConfig.prefer.defaultPrintingSortFields.promoTypes, prefix),
           frameEffects: prefixPath(baseConfig.prefer.defaultPrintingSortFields.frameEffects, prefix),
@@ -2919,8 +2923,8 @@ var ScryfallQueryDSL = (() => {
 
   // src/runtime/version.js
   var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
-  var RELEASE = true ? "0.2.0-rc.1+3f372f7" : VERSION;
-  var BUILD_DATE = true ? "2026-04-05T19:14:30.731Z" : "unbundled";
+  var RELEASE = true ? "0.2.0-rc.1+6404f6a" : VERSION;
+  var BUILD_DATE = true ? "2026-04-06T23:14:05.344Z" : "unbundled";
   var announced = false;
   function announceBrowserBuild() {
     if (announced || typeof window === "undefined" || typeof console?.info !== "function") {

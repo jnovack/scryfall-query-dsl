@@ -288,6 +288,7 @@ test("built-in ctx.card profile supports unique and prefer mappings on card-pref
   const preferredDefault = engine.compile("prefer:default", { profile: "ctx.card" });
   assert.deepEqual(preferredDefault.dsl.query, { match_all: {} });
   assert.deepEqual(preferredDefault.dsl.sort, [
+    { "card.promo": { order: "asc", unmapped_type: "boolean" } },
     { "card.full_art": { order: "asc", unmapped_type: "boolean" } },
     { "card.promo_types": { order: "asc", unmapped_type: "keyword", missing: "_first" } },
     { "card.frame_effects": { order: "asc", unmapped_type: "keyword", missing: "_first" } },

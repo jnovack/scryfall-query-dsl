@@ -50,13 +50,14 @@ export const DEFAULT_CONTROL_CONFIG = {
     colors: "colors",
   },
   langField: "lang",
-  prefer: {
-    defaultPrintingSortFields: {
-      fullArt: "full_art",
-      promoTypes: "promo_types",
-      frameEffects: "frame_effects",
-      setType: "set_type",
-      frame: "frame",
+    prefer: {
+      defaultPrintingSortFields: {
+        promo: "promo",
+        fullArt: "full_art",
+        promoTypes: "promo_types",
+        frameEffects: "frame_effects",
+        setType: "set_type",
+        frame: "frame",
       finishes: "finishes",
       borderColor: "border_color",
       releasedAt: "released_at",
@@ -132,6 +133,7 @@ export function createPrefixedControlConfig(prefix, baseConfig = DEFAULT_CONTROL
     langField: prefixPath(baseConfig.langField, prefix),
     prefer: {
       defaultPrintingSortFields: {
+        promo: prefixPath(baseConfig.prefer.defaultPrintingSortFields.promo, prefix),
         fullArt: prefixPath(baseConfig.prefer.defaultPrintingSortFields.fullArt, prefix),
         promoTypes: prefixPath(baseConfig.prefer.defaultPrintingSortFields.promoTypes, prefix),
         frameEffects: prefixPath(baseConfig.prefer.defaultPrintingSortFields.frameEffects, prefix),

@@ -1310,6 +1310,7 @@ test("supports prefer directives", () => {
 
   assert.deepEqual(preferredDefault.dsl.query, { match_all: {} });
   assert.deepEqual(preferredDefault.dsl.sort, [
+    { promo: { order: "asc", unmapped_type: "boolean" } },
     { full_art: { order: "asc", unmapped_type: "boolean" } },
     { promo_types: { order: "asc", unmapped_type: "keyword", missing: "_first" } },
     { frame_effects: { order: "asc", unmapped_type: "keyword", missing: "_first" } },
@@ -1911,7 +1912,7 @@ test("combines unique:cards with prefer:default and keeps name sorting", () => {
     },
   });
   assert.deepEqual(result.sort[0], { "name.keyword": { order: "asc", unmapped_type: "keyword" } });
-  assert.equal(result.sort.length, 10);
+  assert.equal(result.sort.length, 11);
 });
 
 test("parses quoted values as a single term", () => {
