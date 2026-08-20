@@ -8,6 +8,36 @@ The format is based on Keep a Changelog.
 
 - No unreleased entries yet.
 
+## [0.2.0-rc.2] - 2026-08-20
+
+### Added
+
+- Oracle/function tag field family:
+  - `otag:`, `oracletag:`, `function:` -> `term` query against `otag_terms`
+    (one field, two aliases; ancestor expansion happens upstream at index
+    time, so this field only ever emits a single exact-term query).
+  - `normalizeOracleTagValue` canonicalizes slugs and human phrases
+    (`otag:"mana rock"` -> `mana-rock`) to match moxfall's
+    `canonicalOracleTagTerm` term contract exactly.
+- Golden cross-repo regression test (`test/oracle-tag-golden.test.js`)
+  comparing raw-corpus canonicalization against moxfall's landed Go
+  normalizer output.
+
+### Changed
+
+- Keyword reference docs (`website/keywords.html`) and
+  `docs/SYNTAX-COVERAGE.md` updated: Tagger Tags moved from Unsupported to
+  Partial now that `otag:`/`oracletag:`/`function:` are supported. Art tags
+  (`art:`, `atag:`) remain unimplemented.
+
+### Known Limits
+
+- Art/illustration tags (`art:`, `atag:`) remain unsupported; their
+  association semantics differ from oracle-level function tags.
+- Browser activation of `otag_terms` search in moxfall remains gated
+  separately on that repository's index rollout; this release only ships the
+  DSL-side support.
+
 ## [0.2.0-rc.1] - 2026-03-20
 
 ### Added

@@ -505,6 +505,18 @@ test("built-in ctx.card profile compiles is:promo and is:spotlight against card-
   });
 });
 
+test("built-in ctx.card profile derives the otag_terms path by prefixing, not a hand-authored second path", () => {
+  // Guards against a future definition adding an explicit {default, ctx.card}
+  // esPath pair to the otag field instead of relying on derivation — see
+  // .local/REFACTOR.md's "Do not put {default, ctx.card} paths into esPath"
+  // hard constraint.
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("otag:mana-rock", { profile: "ctx.card" }).dsl, {
+    term: { "card.otag_terms": "mana-rock" },
+  });
+});
+
 test("resolveNestedPath uses longest-matching container regardless of registration order", () => {
   // Regression test for first-match vs. longest-match behavior.
   // When nestedContainers includes both "outer" and "outer.inner" and the esPath

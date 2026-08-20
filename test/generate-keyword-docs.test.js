@@ -28,3 +28,28 @@ test("border-frame renders is:foil and is:nonfoil as supported cards", () => {
   assert.match(borderFrameSection, /badge-name badge-unsupported">is:hires<\/code>/);
   assert.match(borderFrameSection, /badge-name badge-unsupported">stamp:<\/code>/);
 });
+
+test("tagger-tags renders otag as a single supported card with its oracletag/function aliases", () => {
+  const html = buildKeywordDocsHtml();
+  const taggerTagsSection = extractSection(html, "tagger-tags");
+
+  assert.ok(taggerTagsSection.length > 0, "Expected tagger-tags section to exist.");
+
+  // otag renders as one supported field card carrying all three name badges
+  // (otag plus its oracletag/function aliases), not three separate cards.
+  assert.match(taggerTagsSection, /id="field-otag"/);
+  assert.match(
+    taggerTagsSection,
+    /<span class="field-names"><code class="badge badge-name">otag<\/code> <code class="badge badge-name">oracletag<\/code> <code class="badge badge-name">function<\/code><\/span>/
+  );
+
+  // None of the three names may appear as an unsupported entry.
+  assert.doesNotMatch(taggerTagsSection, /badge-name badge-unsupported">otag<\/code>/);
+  assert.doesNotMatch(taggerTagsSection, /badge-name badge-unsupported">oracletag<\/code>/);
+  assert.doesNotMatch(taggerTagsSection, /badge-name badge-unsupported">function:<\/code>/);
+  assert.doesNotMatch(taggerTagsSection, /badge-name badge-unsupported">function<\/code>/);
+
+  // art:/atag: remain unsupported.
+  assert.match(taggerTagsSection, /badge-name badge-unsupported">art:<\/code>/);
+  assert.match(taggerTagsSection, /badge-name badge-unsupported">atag:<\/code>/);
+});

@@ -14,6 +14,7 @@ import {
   RELEASE,
   VERSION,
 } from "../src/index.js";
+import { createDefaultFieldDefinitions } from "../src/fields/defaults.js";
 
 function wrapNested(path, clause) {
   return { nested: { path, query: clause, ignore_unmapped: true } };
@@ -2285,4 +2286,136 @@ test("registerField rejects missing or empty operators array for non-control fie
     }),
     /must define a non-empty "operators" array/
   );
+});
+
+// otag / oracletag / function — see .local/REFACTOR.md §The canonical term
+// contract. normalizeOracleTagValue must match moxfall's canonicalOracleTagTerm
+// exactly on separator handling; these tests exercise that contract plus the
+// otag field's compilation behavior end to end.
+
+test("otag/oracletag/function aliases compile to the same term body", () => {
+  const engine = createEngine();
+
+  for (const prefix of ["otag", "oracletag", "function"]) {
+    const { dsl } = engine.compile(`${prefix}:mana-rock`);
+    assert.deepEqual(dsl, { term: { otag_terms: "mana-rock" } }, `alias: ${prefix}`);
+  }
+});
+
+test("otag: normalizes quoted phrases, underscores, and repeated whitespace", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile('otag:"mana rock"').dsl, { term: { otag_terms: "mana-rock" } });
+  assert.deepEqual(engine.compile("otag:mana_rock").dsl, { term: { otag_terms: "mana-rock" } });
+  assert.deepEqual(engine.compile('otag:"mana   rock"').dsl, { term: { otag_terms: "mana-rock" } });
+  assert.deepEqual(engine.compile('otag:"  mana rock  "').dsl, { term: { otag_terms: "mana-rock" } });
+});
+
+test("otag: preserves non-separator punctuation", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile('otag:"D&D item"').dsl, { term: { otag_terms: "d&d-item" } });
+  assert.deepEqual(engine.compile('otag:"single target instant/sorcery"').dsl, {
+    term: { otag_terms: "single-target-instant/sorcery" },
+  });
+  assert.deepEqual(engine.compile("otag:already-hyphenated").dsl, { term: { otag_terms: "already-hyphenated" } });
+});
+
+test("otag: supports the = operator", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("otag=ramp").dsl, { term: { otag_terms: "ramp" } });
+});
+
+test("otag: supports negation", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("-otag:tutor").dsl, {
+    bool: { must_not: [{ term: { otag_terms: "tutor" } }] },
+  });
+});
+
+test("otag: conjuncts with another field", () => {
+  const engine = createEngine();
+
+  assert.deepEqual(engine.compile("otag:ramp c:green").dsl, {
+    bool: {
+      must: [
+        { term: { otag_terms: "ramp" } },
+        {
+          bool: {
+            should: [
+              buildContainsColorClause("colors", ["G"]),
+              wrapNested("card_faces", buildContainsColorClause("card_faces.colors", ["G"])),
+            ],
+            minimum_should_match: 1,
+          },
+        },
+      ],
+    },
+  });
+});
+
+test("otag: throws on empty or separator-only input", () => {
+  const engine = createEngine();
+
+  assert.throws(() => engine.compile("otag:_"), /Oracle tag must be a non-empty string/);
+});
+
+test("normalizeOracleTagValue matches the canonical term contract (13 shared rows)", () => {
+  // Table reproduced from .local/REFACTOR.md §The canonical term contract.
+  // moxfall's otags_test.go has the identical 13 rows; both were executed
+  // against both implementations and agree on every one. Non-ASCII inputs are
+  // built via String.fromCodePoint — an invisible character in source is
+  // unreviewable.
+  const { otag } = createDefaultFieldDefinitions();
+  const FEFF = String.fromCodePoint(0xfeff);
+  const NEL = String.fromCodePoint(0x0085);
+  const IDEOGRAPHIC_SPACE = String.fromCodePoint(0x3000);
+  const THROWS = Symbol("throws");
+
+  const cases = [
+    [" Mana Rock ", "mana-rock"],
+    ["D&D item", "d&d-item"],
+    ["single target instant/sorcery", "single-target-instant/sorcery"],
+    ["Synergy_P/T", "synergy-p/t"],
+    ["already-hyphenated", "already-hyphenated"],
+    ["_ramp", "ramp"],
+    ["ramp_", "ramp"],
+    ["mana__rock", "mana-rock"],
+    ["mana   rock", "mana-rock"],
+    ["_", THROWS],
+    [`${FEFF}ramp${FEFF}`, "ramp"],
+    [`mana${NEL}rock`, "mana-rock"],
+    [`mana${IDEOGRAPHIC_SPACE}rock`, "mana-rock"],
+  ];
+
+  assert.equal(cases.length, 13, "contract table must have exactly 13 rows");
+
+  for (const [input, expected] of cases) {
+    if (expected === THROWS) {
+      assert.throws(
+        () => otag.parseValue(input),
+        /Oracle tag must be a non-empty string/,
+        `input: ${JSON.stringify(input)}`
+      );
+    } else {
+      assert.equal(otag.parseValue(input), expected, `input: ${JSON.stringify(input)}`);
+    }
+  }
+});
+
+// Documented JS-only divergence, not a 14th shared-contract row: Go's
+// strings.ToLower("İ") is "i" (1 byte); JS's toLowerCase() produces "i" plus
+// a combining dot above (U+0307). See .local/REFACTOR.md §Scope of the
+// guarantee — separator handling is guaranteed identical, full Unicode
+// lowercase parity is not.
+test("normalizeOracleTagValue diverges from Go's lowercase on U+0130 (documented JS-only behavior)", () => {
+  const { otag } = createDefaultFieldDefinitions();
+  const capitalIWithDotAbove = String.fromCodePoint(0x0130);
+  // "i" + U+0307 COMBINING DOT ABOVE — built via fromCodePoint rather than a
+  // literal so the combining mark is reviewable in source.
+  const expected = String.fromCodePoint(0x69, 0x0307);
+
+  assert.equal(otag.parseValue(capitalIWithDotAbove), expected);
 });

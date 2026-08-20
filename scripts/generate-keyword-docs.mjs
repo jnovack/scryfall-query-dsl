@@ -218,11 +218,9 @@ const GROUPS = [
   {
     id: "tagger-tags",
     label: "Tagger Tags",
-    fields: [],
+    fields: ["otag"],
     unsupported: [
       { label: "art:", description: "Tagger art tag (e.g. art:squirrel)" },
-      { label: "function:", description: "Tagger function tag (e.g. function:removal)" },
-      { label: "otag:", description: "Oracle tagger annotation tag" },
       { label: "atag:", description: "Art tagger annotation tag" },
     ],
   },

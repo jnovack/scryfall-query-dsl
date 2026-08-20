@@ -457,12 +457,21 @@
   <section class="group" id="effects">
     <h2>Spells, Permanents, and Effects</h2>
     <div class="field-list">
-    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:spell">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">
-        <span class="field-names"><code class="badge badge-name badge-unsupported">is:spell</code></span>
-        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
+        <span class="field-names"><code class="badge badge-name">is:spell</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
       </div>
-      <p class="field-desc">Instant or sorcery cards</p>
+      <p class="field-desc">Cards with major spell/permanent/battle type lines: creature, artifact, instant, sorcery, enchantment, planeswalker, or battle.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:spell</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-not:spell">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">not:spell</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Exclude cards matching the is:spell type-line disjunction.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>not:spell</code></li></ul></div>
     </div>
     <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">
@@ -785,26 +794,20 @@
   <section class="group" id="tagger-tags">
     <h2>Tagger Tags</h2>
     <div class="field-list">
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-otag">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">otag</code> <code class="badge badge-name">oracletag</code> <code class="badge badge-name">function</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Filter by oracle/function tag (e.g. ramp, tutor, removal). Accepts slugs or human phrases; phrases normalize to the indexed slug form.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>otag:ramp</code></li><li><code>function:tutor</code></li><li><code>otag:&quot;mana rock&quot;</code></li></ul></div>
+    </div>
     <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">
         <span class="field-names"><code class="badge badge-name badge-unsupported">art:</code></span>
         <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
       </div>
       <p class="field-desc">Tagger art tag (e.g. art:squirrel)</p>
-    </div>
-    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
-      <div class="field-header d-flex align-items-center flex-wrap gap-2">
-        <span class="field-names"><code class="badge badge-name badge-unsupported">function:</code></span>
-        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
-      </div>
-      <p class="field-desc">Tagger function tag (e.g. function:removal)</p>
-    </div>
-    <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
-      <div class="field-header d-flex align-items-center flex-wrap gap-2">
-        <span class="field-names"><code class="badge badge-name badge-unsupported">otag:</code></span>
-        <span class="unsupported-tag ms-auto"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>Not implemented</span>
-      </div>
-      <p class="field-desc">Oracle tagger annotation tag</p>
     </div>
     <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">
@@ -887,16 +890,16 @@
         <span class="field-names"><code class="badge badge-name">is</code></span>
         <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
       </div>
-      <p class="field-desc">Filter by card properties. Supports many token values from Scryfall (frame effects, promo types, layouts, rarities) plus semantic shortcuts: is:commander (legal commander), is:promo (promotional printing), is:spotlight (story spotlight), is:digital (MTGO or Arena only), is:default (standard printing).</p>
-      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:commander</code></li><li><code>is:promo</code></li><li><code>is:digital</code></li><li><code>is:foil</code></li><li><code>is:showcase</code></li></ul></div>
+      <p class="field-desc">Filter by card properties. Supports many token values from Scryfall (frame effects, promo types, layouts, rarities) plus semantic shortcuts: is:commander (legal commander), is:spell (cards with major spell/permanent/battle type lines), is:promo (promotional printing), is:spotlight (story spotlight), is:digital (MTGO or Arena only), is:default (standard printing).</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:commander</code></li><li><code>is:spell</code></li><li><code>is:promo</code></li><li><code>is:digital</code></li><li><code>is:foil</code></li><li><code>is:showcase</code></li></ul></div>
     </div>
     <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-not">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">
         <span class="field-names"><code class="badge badge-name">not</code></span>
         <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
       </div>
-      <p class="field-desc">Exclude cards matching a property token. Uses the same token vocabulary as is: but negates the match.</p>
-      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>not:showcase</code></li><li><code>not:extendedart</code></li></ul></div>
+      <p class="field-desc">Exclude cards matching a property token. Uses the same token vocabulary as is: but negates the match, including semantic shortcuts such as not:spell.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>not:showcase</code></li><li><code>not:extendedart</code></li><li><code>not:spell</code></li></ul></div>
     </div>
     <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">

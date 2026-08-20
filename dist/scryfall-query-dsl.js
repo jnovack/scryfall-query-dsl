@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.1+6404f6a | built 2026-04-06T23:14:05.344Z */
+/* scryfall-query-dsl v0.2.0-rc.2+86fadb9 | built 2026-08-20T22:31:18.416Z */
 var ScryfallQueryDSL = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -2224,6 +2224,14 @@ var ScryfallQueryDSL = (() => {
     }
     return normalized;
   }
+  var ORACLE_TAG_SEPARATORS = /[_\s\u0085]+/gu;
+  function normalizeOracleTagValue(value) {
+    const normalized = String(value).toLowerCase().replace(ORACLE_TAG_SEPARATORS, " ").trim().replace(/ +/gu, "-");
+    if (!normalized) {
+      throw new Error("Oracle tag must be a non-empty string.");
+    }
+    return normalized;
+  }
   function parseDateValue(value) {
     const normalized = String(value).trim();
     const datePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -2704,6 +2712,22 @@ var ScryfallQueryDSL = (() => {
         parseValue: (value) => String(value).trim(),
         compile: compileKeywordField
       },
+      // otag / oracletag / function — Scryfall treats these three names as
+      // synonyms for the same oracle-level function tag, so they are one field
+      // with two aliases rather than three fields. Ancestor expansion happens
+      // upstream at index time: the indexer flattens the tag hierarchy and
+      // writes every transitive ancestor into otag_terms, so this field only
+      // ever emits a single exact-term query.
+      otag: {
+        aliases: ["oracletag", "function"],
+        esPath: "otag_terms",
+        operators: [":", "="],
+        type: "keyword",
+        description: "Filter by oracle/function tag (e.g. ramp, tutor, removal). Accepts slugs or human phrases; phrases normalize to the indexed slug form.",
+        examples: ["otag:ramp", "function:tutor", 'otag:"mana rock"'],
+        parseValue: normalizeOracleTagValue,
+        compile: compileKeywordField
+      },
       name: {
         aliases: ["name", "n"],
         esPath: "name",
@@ -2922,9 +2946,9 @@ var ScryfallQueryDSL = (() => {
   }
 
   // src/runtime/version.js
-  var VERSION = true ? "0.2.0-rc.1" : "0.0.0-dev";
-  var RELEASE = true ? "0.2.0-rc.1+6404f6a" : VERSION;
-  var BUILD_DATE = true ? "2026-04-06T23:14:05.344Z" : "unbundled";
+  var VERSION = true ? "0.2.0-rc.2" : "0.0.0-dev";
+  var RELEASE = true ? "0.2.0-rc.2+86fadb9" : VERSION;
+  var BUILD_DATE = true ? "2026-08-20T22:31:18.416Z" : "unbundled";
   var announced = false;
   function announceBrowserBuild() {
     if (announced || typeof window === "undefined" || typeof console?.info !== "function") {

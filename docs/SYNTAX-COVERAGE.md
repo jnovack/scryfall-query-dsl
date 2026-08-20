@@ -41,7 +41,7 @@ This tracker mirrors the section order from `https://scryfall.com/docs/syntax` s
 | Multi-faced Cards | Unsupported | Not implemented as built-ins yet. |
 | Spells/Permanents/Effects | Unsupported | Not implemented as built-ins yet. |
 | Extra and Funny Cards | Unsupported | Not implemented as built-ins yet. |
-| Tagger Tags | Unsupported | Not implemented as built-ins yet. |
+| Tagger Tags | Partial | Oracle/function tags (`otag:`, `oracletag:`, `function:`) supported; art tags (`art:`, `atag:`) not implemented. |
 | Rarity | Supported | `r` / `rarity` with keyword and comparison operators. |
 | Sets/Blocks | Partial | `set:` and `st:` are supported; broader set/block syntax still pending. |
 | Cubes | Unsupported | Not implemented as built-ins yet. |
@@ -130,7 +130,7 @@ The following syntax areas from the Scryfall syntax reference are currently unsu
 | Price queries beyond the built-in price fields | `cheapest:usd` |
 | Artist, watermark, art counts | `a:"proce"`, `wm:orzhov`, `artists>1`, `illustrations>1` |
 | Border/frame families beyond current support | `stamp:acorn`, `is:hires` |
-| Tagger tags | `art:squirrel`, `function:removal`, `otag:removal` |
+| Art tagger tags | `art:squirrel`, `atag:squirrel` |
 | Reprint and print-count syntax | `is:reprint`, `not:reprint`, `sets>=20`, `papersets=1` |
 | Language syntax beyond `lang` preference sorting | `lang:any`, `new:language`, `in:ru` |
 | Shortcut land nicknames and Masterpiece shortcuts | `is:dual`, `is:fetchland`, `is:masterpiece` |

@@ -43,6 +43,31 @@ function parseNonEmptyKeywordValue(value) {
   return normalized;
 }
 
+// Union of JS \s and Go unicode.IsSpace, plus "_". \s already covers U+FEFF;
+// U+0085 is listed explicitly because \s does not include it. Keep this class
+// in step with isOracleTagSeparator in moxfall's internal/stages/cards/otags.go.
+//
+// otag_terms is populated by moxfall's canonicalOracleTagTerm, so this must
+// stay byte-for-byte in step with it (separator handling only — full Unicode
+// lowercase parity is not guaranteed, see .local/REFACTOR.md). Do not collapse
+// this into normalizeKeywordValue: that helper does not fold "_" or collapse
+// runs of whitespace, so `otag:"mana rock"` would compile to a term no
+// document carries.
+const ORACLE_TAG_SEPARATORS = /[_\s\u0085]+/gu;
+
+function normalizeOracleTagValue(value) {
+  const normalized = String(value)
+    .toLowerCase()
+    .replace(ORACLE_TAG_SEPARATORS, " ")
+    .trim()
+    .replace(/ +/gu, "-");
+
+  if (!normalized) {
+    throw new Error("Oracle tag must be a non-empty string.");
+  }
+  return normalized;
+}
+
 function parseDateValue(value) {
   const normalized = String(value).trim();
   const datePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -556,6 +581,22 @@ export function createDefaultFieldDefinitions() {
       description: "Filter by rules keyword (flying, trample, haste, etc.). Matches the keywords array field, not oracle text.",
       examples: ["keywords:flying", "kw:trample", "keyword:deathtouch", "kw:haste kw:flash"],
       parseValue: (value) => String(value).trim(),
+      compile: compileKeywordField,
+    },
+    // otag / oracletag / function — Scryfall treats these three names as
+    // synonyms for the same oracle-level function tag, so they are one field
+    // with two aliases rather than three fields. Ancestor expansion happens
+    // upstream at index time: the indexer flattens the tag hierarchy and
+    // writes every transitive ancestor into otag_terms, so this field only
+    // ever emits a single exact-term query.
+    otag: {
+      aliases: ["oracletag", "function"],
+      esPath: "otag_terms",
+      operators: [":", "="],
+      type: "keyword",
+      description: "Filter by oracle/function tag (e.g. ramp, tutor, removal). Accepts slugs or human phrases; phrases normalize to the indexed slug form.",
+      examples: ["otag:ramp", "function:tutor", 'otag:"mana rock"'],
+      parseValue: normalizeOracleTagValue,
       compile: compileKeywordField,
     },
     name: {
