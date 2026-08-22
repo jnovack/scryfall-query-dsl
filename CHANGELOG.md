@@ -6,6 +6,10 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+- No unreleased entries yet.
+
+## [0.2.0] - 2026-08-22
+
 ### Added
 
 - `engine.describeFields({ profile })` — the keyword reference, readable at

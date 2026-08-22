@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.2+ad286f4 | built 2026-08-21T01:16:40.149Z */
+/* scryfall-query-dsl v0.2.0+55db348 | built 2026-08-22T19:59:11.091Z */
 
 // src/compiler/helpers.js
 var ATOM_PATTERN = /^(-)?([^:><=]+)(>=|<=|:|=|>|<)(.+)$/;
@@ -3318,9 +3318,9 @@ function createRegistry() {
 }
 
 // src/runtime/version.js
-var VERSION = true ? "0.2.0-rc.2" : "0.0.0-dev";
-var RELEASE = true ? "0.2.0-rc.2+ad286f4" : VERSION;
-var BUILD_DATE = true ? "2026-08-21T01:16:40.149Z" : "unbundled";
+var VERSION = true ? "0.2.0" : "0.0.0-dev";
+var RELEASE = true ? "0.2.0+55db348" : VERSION;
+var BUILD_DATE = true ? "2026-08-22T19:59:11.091Z" : "unbundled";
 var announced = false;
 function announceBrowserBuild() {
   if (announced || typeof window === "undefined" || typeof console?.info !== "function") {
