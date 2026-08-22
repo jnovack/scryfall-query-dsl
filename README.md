@@ -57,8 +57,23 @@ Current built-ins include:
 - controls (`unique`, `order`, `prefer`, `direction`, `lang`)
 - shortcut tokens (`is:`, `not:` with metadata support)
 - baseline Scryfall-style bare-term semantics (`lightning bolt` => implicit `AND`; quote for phrase search)
+- a self-describing keyword reference (`engine.describeFields()`)
 
 See behavior details and known deviations in [docs/SYNTAX-COVERAGE.md](./docs/SYNTAX-COVERAGE.md).
+
+### In-app syntax help
+
+```js
+const { groups } = engine.describeFields();
+```
+
+`describeFields()` returns every field the loaded engine actually compiles —
+names, aliases, operators, descriptions and examples — grouped like the keyword
+reference page. Render your in-app cheat sheet from it rather than copying the
+docs: a copy has no failing test when this library adds a field, so it goes
+stale without anyone noticing, while this always matches the bundle in front of
+the user. Fields you register yourself show up too, under `Other Fields`. See
+[docs/API.md](./docs/API.md#enginedescribefieldsoptions).
 
 ## Documentation Map
 

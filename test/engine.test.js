@@ -10,11 +10,13 @@ import {
   compileNumericField,
   compileNotShortcutField,
   createEngine,
+  KEYWORD_GROUPS,
   parseColorExpression,
   RELEASE,
   VERSION,
 } from "../src/index.js";
 import { createDefaultFieldDefinitions } from "../src/fields/defaults.js";
+import { assembleGroups } from "../src/fields/groups.js";
 
 function wrapNested(path, clause) {
   return { nested: { path, query: clause, ignore_unmapped: true } };
@@ -2418,4 +2420,231 @@ test("normalizeOracleTagValue diverges from Go's lowercase on U+0130 (documented
   const expected = String.fromCodePoint(0x69, 0x0307);
 
   assert.equal(otag.parseValue(capitalIWithDotAbove), expected);
+});
+
+// ---------------------------------------------------------------------------
+// describeFields() — the runtime keyword reference
+//
+// These tests exist because the reference used to live twice: once on the field
+// definitions, once in a build script no browser could reach. Consumers copied
+// it by hand, and nothing failed when this library added a field. Each test
+// below pins one way that drift could come back.
+// ---------------------------------------------------------------------------
+
+function allDescribedFields(reference) {
+  return reference.groups.flatMap((group) => group.fields);
+}
+
+test("describeFields groups match KEYWORD_GROUPS ids in declared order", () => {
+  const engine = createEngine();
+  const reference = engine.describeFields();
+
+  assert.equal(reference.version, RELEASE);
+  assert.equal(reference.profile, "default");
+  assert.deepEqual(
+    reference.groups.map((group) => group.id),
+    KEYWORD_GROUPS.map((group) => group.id)
+  );
+});
+
+test("describeFields output is JSON-serializable, so no compile/parseValue leaks through", () => {
+  const engine = createEngine();
+  const reference = engine.describeFields();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(reference)), reference);
+});
+
+// The round-trip above proves only that functions are gone; it passes happily on
+// arrays shared with the registry. Detachment needs its own test: a consumer
+// storing this in framework state and sorting it must not change what the engine
+// reports next, and must never be able to reach into the registry.
+test("describeFields returns a detached snapshot that consumer mutation cannot corrupt", () => {
+  const engine = createEngine();
+  const before = engine.describeFields();
+
+  assert.doesNotThrow(() => structuredClone(before));
+
+  const mutated = engine.describeFields();
+  mutated.groups.push({ id: "injected", label: "Injected", note: "", fields: [], unsupported: [] });
+  mutated.groups[0].fields.push({ name: "injected" });
+  mutated.groups[0].fields[0].aliases.push("injected");
+  mutated.groups[0].fields[0].names.push("injected");
+  mutated.groups[0].fields[0].examples.push("injected");
+  mutated.groups[0].fields[0].operators.push("injected");
+  mutated.groups[0].unsupported.push({ label: "injected", description: "" });
+  mutated.groups[0].label = "mutated";
+
+  assert.deepEqual(engine.describeFields(), before);
+});
+
+test("registry descriptors are detached too, so the internal primitive cannot leak registry arrays", () => {
+  const engine = createEngine();
+  const first = engine.describeFields();
+  const colors = first.groups.flatMap((group) => group.fields).find((f) => f.name === "colors");
+
+  colors.aliases.push("injected");
+  colors.examples.push("injected");
+
+  const second = engine.describeFields();
+  const colorsAgain = second.groups.flatMap((g) => g.fields).find((f) => f.name === "colors");
+
+  assert.ok(!colorsAgain.aliases.includes("injected"));
+  assert.ok(!colorsAgain.examples.includes("injected"));
+  assert.deepEqual(engine.compile("c:red"), engine.compile("c:red"));
+});
+
+// A synthetic that renders as a thin or nameless card is worse than a missing
+// one: consumers filter nameless fields out, so it disappears without a warning.
+test("supported synthetics carry the same descriptor shape as registry fields", () => {
+  const engine = createEngine();
+  const fields = allDescribedFields(engine.describeFields());
+
+  const registryField = fields.find((field) => field.name === "colors");
+  const synthetic = fields.find((field) => field.name === "is:foil");
+
+  assert.ok(synthetic, "expected is:foil to be described");
+  assert.deepEqual(Object.keys(synthetic).sort(), Object.keys(registryField).sort());
+
+  for (const key of Object.keys(registryField)) {
+    assert.equal(
+      Array.isArray(synthetic[key]) ? "array" : typeof synthetic[key],
+      Array.isArray(registryField[key]) ? "array" : typeof registryField[key],
+      `descriptor key "${key}" differs in type between a synthetic and a registry field`
+    );
+  }
+
+  assert.equal(synthetic.name, "is:foil");
+  assert.deepEqual(synthetic.operators, [":", "="]);
+});
+
+test("describeFields surfaces every registered field, so a new field cannot be invisible in consumers", () => {
+  const engine = createEngine();
+  const described = allDescribedFields(engine.describeFields()).map((field) => field.name);
+  const registered = Object.keys(createDefaultFieldDefinitions());
+
+  for (const name of registered) {
+    assert.equal(
+      described.filter((describedName) => describedName === name).length,
+      1,
+      `field "${name}" must appear exactly once in describeFields() output`
+    );
+  }
+});
+
+test("a field registered at runtime appears in the trailing other group", () => {
+  const engine = createEngine();
+  engine.registerField("deck_count", {
+    esPath: "deck_count",
+    operators: [":", ">"],
+    type: "number",
+    description: "Number of decks running this card.",
+    examples: ["deck_count>100"],
+    compile: compileNumericField,
+  });
+
+  const reference = engine.describeFields();
+  const other = reference.groups[reference.groups.length - 1];
+
+  assert.equal(other.id, "other");
+  assert.equal(other.label, "Other Fields");
+  assert.deepEqual(
+    other.fields.map((field) => field.name),
+    ["deck_count"]
+  );
+  assert.equal(other.fields[0].description, "Number of decks running this card.");
+});
+
+test("the other group is absent when every field is grouped", () => {
+  const engine = createEngine();
+  const ids = engine.describeFields().groups.map((group) => group.id);
+
+  assert.ok(!ids.includes("other"), `expected no orphan group, got: ${ids.join(", ")}`);
+});
+
+// Aliases must come from the live alias map, not from definition.aliases:
+// registerAlias() and extend({ aliases }) write only to the map, so a
+// definition-derived list would show a reference the compiler disagrees with.
+test("an alias added with registerAlias appears on its field's card", () => {
+  const engine = createEngine();
+  engine.registerAlias("edition", "set");
+
+  const setField = allDescribedFields(engine.describeFields()).find((f) => f.name === "set");
+
+  assert.ok(setField.aliases.includes("edition"));
+  assert.ok(setField.names.includes("edition"));
+  assert.equal(engine.resolveFieldName("edition"), "set");
+});
+
+test("an alias added with extend({ aliases }) appears on its field's card", () => {
+  const engine = createEngine();
+  engine.extend({ aliases: { colour: "colors" } });
+
+  const colors = allDescribedFields(engine.describeFields()).find((f) => f.name === "colors");
+
+  assert.ok(colors.aliases.includes("colour"));
+  assert.equal(engine.resolveFieldName("colour"), "colors");
+});
+
+test("a reassigned alias moves to the field it now resolves to", () => {
+  const engine = createEngine();
+  engine.registerAlias("edition", "set");
+  engine.registerAlias("edition", "type_line", { override: true });
+
+  const fields = allDescribedFields(engine.describeFields());
+  const setField = fields.find((field) => field.name === "set");
+  const typeLine = fields.find((field) => field.name === "type_line");
+
+  assert.equal(engine.resolveFieldName("edition"), "type_line");
+  assert.ok(!setField.aliases.includes("edition"), "stale alias must not stay on the old card");
+  assert.ok(typeLine.aliases.includes("edition"));
+});
+
+test("a field's names never repeat its canonical name as an alias", () => {
+  const engine = createEngine();
+
+  for (const field of allDescribedFields(engine.describeFields())) {
+    assert.ok(!field.aliases.includes(field.name), `${field.name} lists itself as an alias`);
+    assert.equal(field.names[0], field.name);
+    assert.equal(new Set(field.names).size, field.names.length, `${field.name} has duplicate names`);
+  }
+});
+
+test("describeFields describes the ctx.card profile with the same field names as default", () => {
+  const engine = createEngine();
+
+  const defaultNames = allDescribedFields(engine.describeFields()).map((f) => f.name);
+  const ctxCard = engine.describeFields({ profile: "ctx.card" });
+
+  assert.equal(ctxCard.profile, "ctx.card");
+  assert.deepEqual(allDescribedFields(ctxCard).map((f) => f.name), defaultNames);
+});
+
+test("describeFields throws on an unknown profile", () => {
+  const engine = createEngine();
+
+  assert.throws(() => engine.describeFields({ profile: "nope" }), /Unknown profile "nope"/);
+});
+
+// A typo in the group data used to render a shorter page in silence. It must
+// now fail loudly, since the group data is the one thing no test can infer.
+test("a group listing an unknown name throws instead of rendering short", () => {
+  assert.throws(
+    () =>
+      assembleGroups(["colors"], [
+        { id: "colors", label: "Colors", fields: ["colors", "colrs"], unsupported: [] },
+      ]),
+    /neither a registered field nor a supported synthetic/
+  );
+});
+
+// The regression that motivated the whole API: otag shipped in 0.2.0-rc.2 and no
+// consumer knew, because the reference was a hand-copy.
+test("otag is described with its oracletag and function aliases", () => {
+  const engine = createEngine();
+  const otag = allDescribedFields(engine.describeFields()).find((field) => field.name === "otag");
+
+  assert.ok(otag, "expected otag to be described");
+  assert.deepEqual(otag.names, ["otag", "oracletag", "function"]);
+  assert.ok(otag.examples.length > 0);
+  assert.ok(otag.description.length > 0);
 });

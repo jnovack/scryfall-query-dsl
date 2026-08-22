@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Refuse to push a version tag that disagrees with the manifest at that commit.
+#
+# `git release` derives the version from tag math and asks .githooks/version to
+# apply it, so the two normally cannot diverge. This hook is the backstop for
+# the path that skips the alias entirely: a hand-typed `git tag`. Git has no
+# pre-tag hook, so push time is the earliest enforcement point available — a
+# rejected tag still exists locally, and `git tag -d <tag>` removes it.
+#
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
+
+set -e
+
+root=$(git rev-parse --show-toplevel)
+version_tool="$root/.githooks/version"
+zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
+status=0
+
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+    # Only full semver tags carry a version to check. Branches, and the floating
+    # v0 / v0.2 aliases git release force-pushes, are intentionally ignored:
+    # rejecting those would fail every non-prerelease release.
+    case "$local_ref" in
+        refs/tags/v[0-9]*.[0-9]*.[0-9]*) ;;
+        *) continue ;;
+    esac
+
+    # Tag deletion pushes an all-zero sha and has no commit to inspect.
+    [ "$local_sha" = "$zero" ] && continue
+
+    tag=${local_ref#refs/tags/}
+
+    # Annotated tags push a tag object, not the commit it points at.
+    commit=$(git rev-parse "$local_sha^{commit}")
+
+    if ! manifest=$("$version_tool" read "$commit" 2>/dev/null); then
+        echo "pre-push: refusing $tag — cannot read package.json at $commit" >&2
+        status=1
+        continue
+    fi
+
+    if [ "$tag" != "v$manifest" ]; then
+        echo "pre-push: refusing $tag" >&2
+        echo "  package.json at $commit says $manifest (expected tag v$manifest)" >&2
+        echo "  fix: git tag -d $tag && git release v$manifest" >&2
+        status=1
+    fi
+done
+
+exit $status

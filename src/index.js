@@ -17,6 +17,7 @@
  * @see module:scryfall-query-dsl/engine
  */
 export { createEngine } from "./runtime/createEngine.js";
+export { KEYWORD_GROUPS } from "./fields/groups.js";
 export {
   announceBrowserBuild,
   BUILD_DATE,

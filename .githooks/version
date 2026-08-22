@@ -1,0 +1,82 @@
+#!/bin/sh
+#
+# Repo-local version contract.
+#
+# The tag is the source of truth for this project's version; every file that
+# writes the version down follows it. This script is the only place that knows
+# *which* files those are, so `git release` (a global alias shared with Go and
+# other non-Node repos) stays ecosystem-agnostic.
+#
+# Called by:
+#   git release          -> `.githooks/version write <x.y.z>` before tagging
+#   .githooks/pre-push   -> `.githooks/version read <commit>` to verify a tag
+#
+# See ~/Source/dotfiles/docs/git-release.md for the contract this implements.
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+usage() {
+    echo "usage: .githooks/version read [<rev>]" >&2
+    echo "       .githooks/version write <x.y.z>" >&2
+    exit 2
+}
+
+# Print package.json's version, from the worktree or from a given revision.
+#
+# jq first, node as fallback: the pre-push guard calls this, and a missing jq
+# must not let an unverified tag through. Failing here fails the push.
+read_version() {
+    rev="$1"
+
+    if [ -n "$rev" ]; then
+        json=$(git show "$rev:package.json")
+    else
+        json=$(cat package.json)
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$json" | jq -er .version
+    elif command -v node >/dev/null 2>&1; then
+        printf '%s' "$json" | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{const v=JSON.parse(s).version;if(!v)process.exit(1);console.log(v);})"
+    else
+        echo "version: neither jq nor node is available to read package.json" >&2
+        exit 1
+    fi
+}
+
+# Apply a version to every file that records it, then regenerate what is derived
+# from it. Anything that fails here aborts the release before a tag exists.
+write_version() {
+    version="$1"
+
+    # npm's own writer keeps package.json and both package-lock.json entries in
+    # step; a hand-rolled JSON edit would drift from the lockfile format.
+    npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+
+    node scripts/changelog-release.mjs "$version"
+
+    # A release that cannot pass its own tests should not be tagged.
+    npm test >/dev/null
+
+    # dist/ and website/index.html embed the version, so they are part of "the
+    # version is applied", not a separate chore to remember afterwards.
+    npm run build >/dev/null
+    npm run docs:build >/dev/null
+
+    echo "version: applied $version to package.json, package-lock.json, CHANGELOG.md, dist/, website/"
+}
+
+case "${1:-}" in
+    read)
+        read_version "${2:-}"
+        ;;
+    write)
+        [ -n "${2:-}" ] || usage
+        write_version "$2"
+        ;;
+    *)
+        usage
+        ;;
+esac

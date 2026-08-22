@@ -6,7 +6,31 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
-- No unreleased entries yet.
+### Added
+
+- `engine.describeFields({ profile })` — the keyword reference, readable at
+  runtime from the loaded bundle. Returns every field the profile actually
+  compiles (names, aliases, operators, type, description, examples), grouped
+  the way the reference page groups them, as a detached JSON-safe snapshot.
+  In-app syntax help should be built from this instead of copying the docs: a
+  copy has no failing test when a field is added here, which is how `otag:`
+  shipped in `0.2.0-rc.2` with no consumer awareness.
+- `KEYWORD_GROUPS` export — the group skeleton (section ids, labels, notes,
+  unimplemented-syntax entries) for consumers assembling their own renderer.
+  Deep-frozen, since it is shared by every engine instance in the realm.
+- Keyword reference cards for the `is:` shortcuts that previously existed only
+  in prose: `is:commander`, `is:promo`, `is:spotlight`, `is:digital`,
+  `is:default`. A test now fails if a semantic shortcut ships without a card.
+
+### Changed
+
+- The keyword group data moved from `scripts/generate-keyword-docs.mjs` to
+  `src/fields/groups.js` so it ships in the browser bundle. The generator now
+  renders that data instead of owning it, and both it and `describeFields()`
+  derive group membership from one shared helper.
+- Fields belonging to no declared group now render in a trailing `Other Fields`
+  section instead of being warned about and dropped. A group entry naming an
+  unknown field throws rather than rendering a silently shorter page.
 
 ## [0.2.0-rc.2] - 2026-08-20
 

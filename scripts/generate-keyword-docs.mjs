@@ -12,299 +12,21 @@
  *
  * Adding a new field with `description` and `examples` properties to
  * src/fields/defaults.js is all that's needed for it to appear here.
+ *
+ * The section skeleton itself lives in src/fields/groups.js (KEYWORD_GROUPS),
+ * not here, because it ships in the browser bundle for engine.describeFields().
+ * This file renders it; it does not own it.
  */
 
 import { writeFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { createDefaultFieldDefinitions } from "../src/fields/defaults.js";
+import { assembleGroups, KEYWORD_GROUPS } from "../src/fields/groups.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = resolve(__dirname, "../website");
 const OUTPUT_FILE = resolve(OUTPUT_DIR, "index.html");
-
-// ---------------------------------------------------------------------------
-// Group definitions — 27 sections matching Scryfall's syntax page order.
-//
-// Each group may contain:
-//   fields      — implemented field names (from createDefaultFieldDefinitions())
-//   supported   — docs-only synthetic supported entries rendered with the same card template
-//   note        — short "Supported" note for parser-level features (-, or, grouping)
-//   unsupported — grayed-out items for unimplemented Scryfall syntax
-// ---------------------------------------------------------------------------
-
-const GROUPS = [
-  {
-    id: "colors",
-    label: "Colors and Color Identity",
-    fields: ["colors", "color_identity"],
-    unsupported: [
-      { label: "has:indicator", description: "Cards that have a color indicator on the card face" },
-    ],
-  },
-  {
-    id: "card-types",
-    label: "Card Types",
-    fields: ["type_line"],
-    unsupported: [],
-  },
-  {
-    id: "card-text",
-    label: "Card Text",
-    fields: ["oracle_text", "keywords"],
-    unsupported: [
-      { label: "fo:", description: "Full oracle text search with reminder text excluded" },
-      { label: "o:/regex/", description: "Regular expression search on oracle text" },
-      { label: "~ substitution", description: "Use ~ in oracle text queries to stand for the card's own name" },
-    ],
-  },
-  {
-    id: "mana-costs",
-    label: "Mana Costs",
-    fields: ["mana_value"],
-    unsupported: [
-      { label: "m:", description: "Mana cost expression using mana symbols (e.g. m:{G}{U}, m>3WU)" },
-      { label: "produces:", description: "Mana produced by a land or ability (e.g. produces=wu)" },
-      { label: "devotion:", description: "Devotion to a color (e.g. devotion:{u/b}{u/b})" },
-      { label: "manavalue:odd / manavalue:even", description: "Cards with odd or even mana value" },
-    ],
-  },
-  {
-    id: "power-toughness-loyalty",
-    label: "Power, Toughness, and Loyalty",
-    fields: ["power", "toughness"],
-    unsupported: [
-      { label: "loyalty / loy:", description: "Planeswalker loyalty (e.g. loy=3, loy>=4)" },
-      { label: "pt: / powtou:", description: "Combined power+toughness comparison (e.g. pt=10)" },
-      { label: "pow>tou", description: "Cross-field power vs. toughness math comparisons" },
-    ],
-  },
-  {
-    id: "multi-faced",
-    label: "Multi-faced Cards",
-    fields: [],
-    unsupported: [
-      { label: "is:split", description: "Split cards (Fire // Ice)" },
-      { label: "is:flip", description: "Flip cards (Budoka Gardener)" },
-      { label: "is:transform", description: "Transform (DFC) cards" },
-      { label: "is:meld", description: "Meld cards" },
-      { label: "is:mdfc", description: "Modal double-faced cards" },
-      { label: "is:adventure", description: "Adventure cards" },
-      { label: "is:reversible", description: "Reversible cards" },
-    ],
-  },
-  {
-    id: "effects",
-    label: "Spells, Permanents, and Effects",
-    fields: ["is:spell", "not:spell"],
-    supported: [
-      {
-        name: "is:spell",
-        operators: [":", "="],
-        description: "Cards with major spell/permanent/battle type lines: creature, artifact, instant, sorcery, enchantment, planeswalker, or battle.",
-        examples: ["is:spell"],
-      },
-      {
-        name: "not:spell",
-        operators: [":", "="],
-        description: "Exclude cards matching the is:spell type-line disjunction.",
-        examples: ["not:spell"],
-      },
-    ],
-    unsupported: [
-      { label: "is:permanent", description: "Permanent card types (creature, artifact, enchantment, planeswalker, land)" },
-      { label: "is:historic", description: "Legendary, artifact, or Saga cards" },
-      { label: "is:vanilla", description: "Creatures with no abilities" },
-      { label: "is:modal", description: "Cards with modal effects (choose one, choose two, etc.)" },
-    ],
-  },
-  {
-    id: "extra-funny",
-    label: "Extra Cards and Funny Cards",
-    fields: [],
-    unsupported: [
-      { label: "is:funny", description: "Un-set and acorn-stamped cards" },
-      { label: "include:extras", description: "Include extra cards (tokens, emblems, art cards) in results" },
-      { label: "is:oversized", description: "Oversized card products" },
-    ],
-  },
-  {
-    id: "rarity",
-    label: "Rarity",
-    fields: ["rarity"],
-    unsupported: [
-      { label: "new:rarity", description: "Cards whose rarity changed from their previous printing" },
-    ],
-  },
-  {
-    id: "sets",
-    label: "Sets and Blocks",
-    fields: ["set", "set_type", "collector_number"],
-    unsupported: [
-      { label: "e: / edition:", description: "Alias for set: (not yet a built-in alias)" },
-      { label: "b: / block:", description: "Filter by block code or name (e.g. b:wwk)" },
-    ],
-  },
-  {
-    id: "cubes",
-    label: "Cubes",
-    fields: [],
-    unsupported: [
-      { label: "cube:", description: "Cards in a specific Scryfall cube (e.g. cube:vintage, cube:legacy)" },
-    ],
-  },
-  {
-    id: "legality",
-    label: "Format Legality",
-    fields: ["legal", "banned", "restricted"],
-    unsupported: [],
-  },
-  {
-    id: "prices",
-    label: "USD/EUR/TIX Prices",
-    fields: ["usd", "eur", "tix"],
-    unsupported: [
-      { label: "cheapest:", description: "Cheapest printing in a given currency (e.g. cheapest:usd)" },
-    ],
-  },
-  {
-    id: "artist-flavor",
-    label: "Artist, Flavor Text and Watermark",
-    fields: ["flavor_text"],
-    unsupported: [
-      { label: "a: / artist:", description: "Search by artist name (e.g. a:\"proce\")" },
-      { label: "wm: / watermark:", description: "Filter by watermark guild or symbol (e.g. wm:orzhov)" },
-      { label: "artists>1", description: "Cards illustrated by more than one artist" },
-      { label: "illustrations>1", description: "Cards with more than one illustration" },
-      { label: "new:art / new:artist / new:flavor", description: "Cards with new art, new artist, or new flavor text vs. previous printing" },
-    ],
-  },
-  {
-    id: "border-frame",
-    label: "Border, Frame, Foil and Resolution",
-    fields: ["border_color", "frame", "is:foil", "is:nonfoil"],
-    supported: [
-      {
-        name: "is:foil",
-        operators: [":", "="],
-        description: "Cards available in foil.",
-        examples: ["is:foil"],
-      },
-      {
-        name: "is:nonfoil",
-        operators: [":", "="],
-        description: "Cards available in non-foil.",
-        examples: ["is:nonfoil"],
-      },
-    ],
-    unsupported: [
-      { label: "is:hires", description: "Cards with high-resolution scan imagery" },
-      { label: "stamp:", description: "Filter by security stamp (acorn, arena, oval, triangle, etc.)" },
-    ],
-  },
-  {
-    id: "games-promos",
-    label: "Games, Promos and Spotlights",
-    fields: ["game"],
-    // is:promo, is:spotlight, is:digital are semantic shortcuts under is: (see Shortcuts section)
-    unsupported: [],
-  },
-  {
-    id: "year",
-    label: "Year",
-    fields: ["year", "date"],
-    unsupported: [],
-  },
-  {
-    id: "tagger-tags",
-    label: "Tagger Tags",
-    fields: ["otag"],
-    unsupported: [
-      { label: "art:", description: "Tagger art tag (e.g. art:squirrel)" },
-      { label: "atag:", description: "Art tagger annotation tag" },
-    ],
-  },
-  {
-    id: "reprints",
-    label: "Reprints",
-    fields: [],
-    unsupported: [
-      { label: "is:reprint", description: "Cards that have been printed in a previous set" },
-      { label: "not:reprint", description: "Cards making their first printing appearance" },
-      { label: "sets>=N", description: "Cards printed in at least N sets (e.g. sets>=10)" },
-      { label: "papersets=N", description: "Cards in exactly N paper sets" },
-    ],
-  },
-  {
-    id: "languages",
-    label: "Languages",
-    fields: ["lang"],
-    unsupported: [
-      { label: "lang:any", description: "Cards printed in any non-English language" },
-      { label: "new:language", description: "Cards with a new-language printing vs. previous set" },
-      { label: "in:ru (language filter)", description: "Filter results to a specific language print only (lang: here is a sort preference, not an inclusion filter)" },
-    ],
-  },
-  {
-    id: "shortcuts",
-    label: "Shortcuts and Nicknames",
-    fields: ["is", "not"],
-    unsupported: [
-      { label: "is:dual", description: "Original dual lands (Tundra, Bayou, etc.)" },
-      { label: "is:fetchland", description: "Fetch lands" },
-      { label: "is:shockland", description: "Shock lands" },
-      { label: "is:checkland", description: "Check lands" },
-      { label: "is:companion", description: "Cards with the companion ability" },
-      { label: "is:reserved", description: "Cards on the reserved list" },
-      { label: "is:reprint", description: "Reprint shortcut (see Reprints section)" },
-    ],
-  },
-  {
-    id: "negation",
-    label: "Negating Conditions",
-    fields: [],
-    note: "Supported. Prefix any term or parenthesized group with - to negate it: -t:creature, -(c:red or c:white), -o:draw.",
-    unsupported: [],
-  },
-  {
-    id: "regex",
-    label: "Regular Expressions",
-    fields: [],
-    unsupported: [
-      { label: "o:/regex/", description: "Regular expression search on oracle text" },
-      { label: "name:/regex/", description: "Regular expression name search" },
-      { label: "t:/regex/", description: "Regular expression type line search" },
-    ],
-  },
-  {
-    id: "exact-names",
-    label: "Exact Names",
-    fields: ["name"],
-    unsupported: [
-      { label: "!name: / !o:", description: "Fielded bang exact-match forms are not yet supported" },
-    ],
-  },
-  {
-    id: "or",
-    label: "Using OR",
-    fields: [],
-    note: "Supported. Use the or keyword (case-insensitive) between terms: c:red or c:white, (t:angel or t:demon) c:white.",
-    unsupported: [],
-  },
-  {
-    id: "nesting",
-    label: "Nesting Conditions",
-    fields: [],
-    note: "Supported. Use parentheses to group sub-expressions: (c:red or c:white) t:angel.",
-    unsupported: [],
-  },
-  {
-    id: "display",
-    label: "Display Keywords",
-    fields: ["unique", "order", "prefer", "direction"],
-    unsupported: [],
-  },
-];
 
 // ---------------------------------------------------------------------------
 // HTML helpers
@@ -379,8 +101,10 @@ function renderUnsupported(item) {
 function renderGroup(group, fieldDefs) {
   const noteCard = group.note ? renderNote(group) : "";
 
+  // No filter on unknown names: assembleGroups() has already thrown on any name
+  // that resolves to neither a field nor a synthetic. Filtering here again would
+  // restore the silent short-render that made group typos invisible.
   const fieldCards = (group.fields || [])
-    .filter((name) => fieldDefs[name])
     .map((name) => renderField(name, fieldDefs[name]))
     .join("");
 
@@ -419,22 +143,35 @@ function buildDocFieldDefinitions(baseFieldDefs, groups) {
   return docFieldDefs;
 }
 
-export function buildKeywordDocsHtml() {
-  const baseFieldDefs = createDefaultFieldDefinitions();
-  const fieldDefs = buildDocFieldDefinitions(baseFieldDefs, GROUPS);
+/**
+ * Render the keyword reference page.
+ *
+ * Group membership comes from `assembleGroups()`, the same helper
+ * `engine.describeFields()` uses, so the page and the runtime reference cannot
+ * drift apart — including the trailing `Other Fields` section, which is how a
+ * field that was added without a group stays visible instead of being warned
+ * about and dropped.
+ *
+ * The parameters exist for tests: they need to render a fixture with an
+ * ungrouped field, and KEYWORD_GROUPS is frozen precisely so nobody can inject
+ * one by mutation.
+ *
+ * @param {object} [options]
+ * @param {Record<string, object>} [options.fieldDefinitions] - Field definitions to render.
+ * @param {object[]} [options.groups] - Group skeleton to render.
+ * @returns {string} The complete HTML document.
+ */
+export function buildKeywordDocsHtml(options = {}) {
+  const baseFieldDefs = options.fieldDefinitions ?? createDefaultFieldDefinitions();
+  const groups = options.groups ?? KEYWORD_GROUPS;
+  const fieldDefs = buildDocFieldDefinitions(baseFieldDefs, groups);
+  const assembledGroups = assembleGroups(Object.keys(baseFieldDefs), groups);
 
-  // Track which fields are placed in groups; warn on any orphans.
-  const assignedFields = new Set(GROUPS.flatMap((g) => g.fields || []));
-  const orphans = Object.keys(baseFieldDefs).filter((k) => !assignedFields.has(k));
-  if (orphans.length) {
-    console.warn(`WARNING: fields not assigned to any group: ${orphans.join(", ")}`);
-  }
+  const sections = assembledGroups.map((g) => renderGroup(g, fieldDefs)).join("");
 
-  const sections = GROUPS.map((g) => renderGroup(g, fieldDefs)).join("");
-
-  const nav = GROUPS.map(
-    (g) => `<li><a href="#${escapeHtml(g.id)}">${escapeHtml(g.label)}</a></li>`
-  ).join("");
+  const nav = assembledGroups
+    .map((g) => `<li><a href="#${escapeHtml(g.id)}">${escapeHtml(g.label)}</a></li>`)
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="en">

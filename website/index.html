@@ -769,6 +769,30 @@
       </div>
       <p class="field-desc">Filter by game environment. Valid values: paper, mtgo, arena, astral, sega. Use is:digital as a shorthand for in:mtgo or in:arena.</p>
       <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>game:paper</code></li><li><code>in:mtgo</code></li><li><code>game:arena</code></li><li><code>-in:arena</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:promo">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:promo</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Promotional printing.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:promo</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:spotlight">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:spotlight</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Story spotlight card.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:spotlight</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:digital">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:digital</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Card exists only in digital form (MTGO or Arena). Equivalent to in:mtgo or in:arena.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:digital</code></li></ul></div>
     </div></div>
   </section>
   <section class="group" id="year">
@@ -900,6 +924,22 @@
       </div>
       <p class="field-desc">Exclude cards matching a property token. Uses the same token vocabulary as is: but negates the match, including semantic shortcuts such as not:spell.</p>
       <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>not:showcase</code></li><li><code>not:extendedart</code></li><li><code>not:spell</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:commander">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:commander</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Cards that are legal commanders.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:commander</code></li></ul></div>
+    </div>
+    <div class="field-card card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm" id="field-is:default">
+      <div class="field-header d-flex align-items-center flex-wrap gap-2">
+        <span class="field-names"><code class="badge badge-name">is:default</code></span>
+        <span class="field-ops ms-auto d-flex gap-1 flex-wrap"><code class="badge badge-op">:</code> <code class="badge badge-op">=</code></span>
+      </div>
+      <p class="field-desc">Standard printing: no special frame, promo, or alternate treatment.</p>
+      <div class="field-examples"><span class="examples-label">Examples</span><ul><li><code>is:default</code></li></ul></div>
     </div>
     <div class="field-card field-card--unsupported card border-secondary-subtle bg-body-tertiary text-body-emphasis shadow-sm">
       <div class="field-header d-flex align-items-center flex-wrap gap-2">

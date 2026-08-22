@@ -1,6 +1,8 @@
 import { createCompiler } from "../compiler/index.js";
 import { createPrefixedControlConfig } from "../compiler/control-config.js";
 import { createParser } from "../parser/index.js";
+import { normalizeFieldDescriptor, SYNTHETIC_OPERATORS } from "../fields/descriptors.js";
+import { assembleGroups, collectSyntheticFields } from "../fields/groups.js";
 import { createCtxCardProfileExtension } from "../profiles/ctx-card.js";
 import { createRegistry } from "../registry/index.js";
 import { RELEASE } from "./version.js";
@@ -25,6 +27,33 @@ function createCompilationContext({ extension, controlConfig } = {}) {
  *
  * @module scryfall-query-dsl/engine
  */
+
+/**
+ * Build one group of the keyword reference.
+ *
+ * Everything is rebuilt per call rather than shared: group data is frozen and
+ * registry descriptors are the registry's own view, so handing either out by
+ * reference would let a consumer's `sort()` or `push()` change what the next
+ * call returns — or throw at the consumer, since the source is frozen.
+ */
+function describeGroup(group, descriptorsByName, synthetics) {
+  return {
+    id: group.id,
+    label: group.label,
+    note: group.note || "",
+    fields: group.fields.map(
+      (name) =>
+        descriptorsByName.get(name) ??
+        normalizeFieldDescriptor(name, synthetics.get(name), {
+          defaultOperators: SYNTHETIC_OPERATORS,
+        })
+    ),
+    unsupported: group.unsupported.map((item) => ({
+      label: String(item.label ?? ""),
+      description: String(item.description ?? ""),
+    })),
+  };
+}
 
 /**
  * @typedef {object} CompileMeta
@@ -293,6 +322,52 @@ export function createEngine(options = {}) {
       const context = getProfileContext(profile);
       context.registry.registerField(fieldName, definition, options);
       return this;
+    },
+
+    /**
+     * Describe the keyword reference for one profile: every field the profile
+     * actually compiles, grouped the same way the generated reference page groups them.
+     *
+     * Build in-app syntax help from this rather than copying the library's docs —
+     * a copy has no failing test when a field is added here, so it rots silently,
+     * while this reflects whatever bundle the consumer actually loaded.
+     *
+     * Fields registered at runtime that belong to no declared group appear in a
+     * trailing `other` group, so a custom field is never invisible. `supported`
+     * synthetics (`is:foil`, `is:spell`, …) appear as ordinary descriptors; they
+     * compile as token values rather than fields, but a reader looking for them
+     * should not have to know that.
+     *
+     * The result is a fully detached snapshot: nothing in it aliases the registry
+     * or `KEYWORD_GROUPS`, so it is safe to `structuredClone()`, store in
+     * framework state, sort, or edit in place.
+     *
+     * @param {object} [options]
+     * @param {string} [options.profile="default"] - Profile to describe. Built-in: `"default"`, `"ctx.card"`.
+     * @returns {{version: string, profile: string, groups: object[]}} The grouped reference.
+     * @throws {Error} If the profile is unknown, or a group lists a name that is
+     *   neither a registered field nor a supported synthetic.
+     *
+     * @example
+     * const { groups } = engine.describeFields();
+     * groups[0].fields[0]; // { name: 'colors', names: ['colors', 'c', 'color'], ... }
+     */
+    describeFields(options = {}) {
+      const { profile = "default" } = options;
+      const context = getProfileContext(profile);
+
+      const descriptors = context.registry.listFields();
+      const descriptorsByName = new Map(
+        descriptors.map((descriptor) => [descriptor.name, descriptor])
+      );
+      const synthetics = collectSyntheticFields();
+      const groups = assembleGroups(descriptorsByName.keys());
+
+      return {
+        version: RELEASE,
+        profile,
+        groups: groups.map((group) => describeGroup(group, descriptorsByName, synthetics)),
+      };
     },
 
     /**

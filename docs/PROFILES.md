@@ -35,6 +35,10 @@ A field definition typically includes:
 - `compile`: compiler function
 - optional behavior metadata depending on compiler (for example `legalityStatus`, `tokenFieldMap`)
 - optional behavior metadata depending on compiler (for example `legalityStatus`, `tokenFieldMap`, `semanticShortcuts`)
+- `description` and `examples` (optional): documentation metadata. These are not
+  decoration — they are what the keyword reference page and
+  `engine.describeFields()` render, so a field without them shows up as a bare
+  name in both.
 
 Example:
 
@@ -197,6 +201,22 @@ const { dsl } = engine.compile("color<=mardu legal:commander frame:2015 ip>1", {
 - Prefer helper compilers for common behavior.
 - Use custom compilers only when helper semantics do not fit your schema.
 - Keep token shortcuts explicit (`tokenFieldMap`) so behavior stays explainable.
+
+## Describing a Profile
+
+`engine.describeFields({ profile })` is profile-scoped: it projects that
+profile's own registry, so a profile you built with `registerProfile()` or
+extended with `extendProfile()` describes the fields *it* compiles, not the
+defaults.
+
+Fields that belong to no section of the built-in keyword groups appear in a
+trailing `other` group labeled `Other Fields`, so a custom field is visible in
+the reference without touching `KEYWORD_GROUPS`. Give such fields `description`
+and `examples` and they render as complete cards.
+
+Aliases in the output come from the profile's live alias map, so anything added
+through `registerAlias()` or `extend({ aliases })` shows up on the right card
+immediately. See [API.md](./API.md#enginedescribefieldsoptions).
 
 ## Mapping Prerequisites (Common Gotchas)
 

@@ -1,4 +1,5 @@
 import { createDefaultFieldDefinitions } from "../fields/defaults.js";
+import { normalizeFieldDescriptor } from "../fields/descriptors.js";
 
 function cloneFieldDefinition(definition) {
   return {
@@ -105,6 +106,62 @@ export function createRegistry() {
     return rawValue;
   }
 
+  /**
+   * Group the live alias map by the field each alias currently resolves to.
+   *
+   * Deliberately not `definition.aliases`: `registerAlias()` and
+   * `extend({ aliases })` write only to `aliases`, so a definition-derived list
+   * would omit every runtime alias, and after an override reassigns an alias the
+   * old definition still claims a spelling the compiler now sends elsewhere —
+   * printing one alias on two cards. Reading the map keeps descriptors in step
+   * with `resolveFieldName()`, which is the entire point of this API.
+   *
+   * Insertion order gives definition aliases first, then runtime additions.
+   */
+  function groupAliasesByField() {
+    const byField = new Map();
+
+    for (const [alias, fieldName] of aliases) {
+      if (alias === fieldName) {
+        continue;
+      }
+
+      const existing = byField.get(fieldName);
+      if (existing) {
+        existing.push(alias);
+      } else {
+        byField.set(fieldName, [alias]);
+      }
+    }
+
+    return byField;
+  }
+
+  /**
+   * Project every registered field into a doc-safe descriptor, in registration order.
+   *
+   * Internal: `createRegistry()` is not exported, so this is reached through
+   * `engine.describeFields()`. Returned objects and arrays are fresh on every
+   * call — a caller that mutates them must not be able to change what the
+   * registry reports next.
+   *
+   * @returns {object[]} Descriptors as defined in `descriptors.js`.
+   */
+  function listFields() {
+    const aliasesByField = groupAliasesByField();
+
+    return [...fields.entries()].map(([name, definition]) =>
+      normalizeFieldDescriptor(name, {
+        aliases: aliasesByField.get(name) ?? [],
+        operators: definition.operators,
+        type: definition.type,
+        description: definition.description,
+        examples: definition.examples,
+        searchControl: definition.searchControl,
+      })
+    );
+  }
+
   function registerAlias(alias, fieldName, options = {}) {
     const { override = false } = options;
     const definition = getField(fieldName);
@@ -132,6 +189,7 @@ export function createRegistry() {
   return {
     extend,
     getField,
+    listFields,
     parseValue,
     registerAlias,
     registerField,

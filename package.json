@@ -17,6 +17,7 @@
     "examples"
   ],
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "build": "node ./scripts/build.mjs",
     "build:browser": "node ./scripts/build.mjs --format=browser",
     "build:cjs": "node ./scripts/build.mjs --format=cjs",

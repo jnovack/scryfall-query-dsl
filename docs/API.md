@@ -78,12 +78,30 @@ engine.extend({
     inclusion_percent: {
       aliases: ["ip"],
       esPath: "edhrec.inclusion_percent",
+      operators: [":", "=", "!=", ">", ">=", "<", "<="],
       type: "number",
+      parseValue: (value) => {
+        const numericValue = Number(value);
+        if (Number.isNaN(numericValue)) {
+          throw new Error(`Cannot coerce "${value}" into a numeric value.`);
+        }
+        return numericValue;
+      },
       compile: compileNumericField
     }
   }
 });
 ```
+
+`operators` is required — the registry throws `Field "<name>" must define a
+non-empty "operators" array` without it (`searchControl` fields are the only
+exception). `parseValue` is optional but effectively required for a `number`
+field: without it, the raw string token from the query text is passed straight
+to `compile`, so `compileNumericField`'s `term`/`range` clause runs against
+whatever string the parser captured rather than a JS number. There is no
+built-in numeric `parseValue` exported for reuse — `compileNumericField` is
+exported, but its matching parse step is internal to `fields/defaults.js`, so
+consumers must supply their own, as above.
 
 Supports:
 
@@ -100,6 +118,75 @@ Use `engine.extend(...)` for batch updates and alias sets.
 ## `engine.registerAlias(alias, fieldName)`
 
 Registers one alias directly against an existing field.
+
+## `engine.describeFields(options?)`
+
+Returns the keyword reference for one profile — every field that profile
+actually compiles, grouped the way the [keyword reference page](../website/index.html)
+groups them.
+
+Build in-app syntax help from this rather than copying the reference page. A
+copy has no failing test when a field is added here, so it goes stale silently;
+this reflects whatever bundle the consumer actually loaded.
+
+- `options.profile` (default `"default"`) selects the profile to describe
+- throws on an unknown profile
+
+```js
+const { version, profile, groups } = engine.describeFields();
+
+groups[0];
+// {
+//   id: "colors",
+//   label: "Colors and Color Identity",
+//   note: "",
+//   fields: [
+//     {
+//       name: "colors",
+//       names: ["colors", "c", "color"],   // canonical first, then aliases
+//       aliases: ["c", "color"],
+//       operators: [":", "=", ">", ">=", "<", "<="],
+//       type: "color-set",
+//       description: "Match card colors...",
+//       examples: ["c:red", "c:azorius"],
+//       searchControl: false
+//     }
+//   ],
+//   unsupported: [{ label: "has:indicator", description: "..." }]
+// }
+```
+
+Behavior worth knowing:
+
+- **Every key is always present.** Missing `description` is `""`, missing
+  `examples` is `[]`. Consumers never branch on `undefined`.
+- **Aliases are live.** They come from the profile's alias map, so aliases added
+  with `registerAlias()` or `extend({ aliases })` appear immediately, and a
+  reassigned alias moves to the field it now resolves to. What the reference
+  shows and what `resolveFieldName()` returns cannot disagree.
+- **Custom fields are never invisible.** A field registered at runtime that
+  belongs to no declared group appears in a trailing `other` group
+  (`label: "Other Fields"`). The group is omitted when empty.
+- **Shortcut cards appear as ordinary fields.** `is:foil`, `is:commander` and
+  friends compile as token values of `is:` rather than as fields of their own,
+  but they are described with the same descriptor shape, since a reader looking
+  for them should not have to know that.
+- **The result is detached.** Nothing aliases the registry or `KEYWORD_GROUPS`,
+  so it is safe to `structuredClone()`, put in framework state, sort, or edit in
+  place.
+- Elasticsearch paths (`esPath`, `esPaths`) and compiler internals (`compile`,
+  `parseValue`) are deliberately omitted. They are implementation details of the
+  compiler, and exposing them would make this a wire contract.
+
+## `KEYWORD_GROUPS`
+
+The group skeleton `describeFields()` renders into — section ids, labels, notes,
+and the unimplemented-syntax entries shown grayed out on the reference page.
+Exported for consumers building a custom renderer that assembles fields itself.
+
+The value is deep-frozen: it is shared by every engine instance in the realm, so
+mutating it would change what other consumers see. Copy it if you need to
+reshape it.
 
 ## Profile APIs
 

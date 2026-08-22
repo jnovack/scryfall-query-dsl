@@ -88,29 +88,58 @@ When token behavior changes, update all of:
 - `test/engine.test.js`
 - `test/ctx-card-profile.test.js` (if built-in profile behavior is touched)
 
-## Quick Release Checklist
+## Versioning
 
-1. Update `src/fields/is-not-token-index.js`.
-2. Update tests and docs in the same commit.
+**The git tag is the version.** Do not edit `version` in `package.json` or
+`package-lock.json` by hand, and do not write a version heading in
+`CHANGELOG.md` — `git release` produces all three at tag time.
+
+While working, changelog entries go under `## [Unreleased]`. The release step
+retitles that section to the version being tagged, because the number is not
+decided until then.
+
+`git release` calls `.githooks/version write <x.y.z>`, which applies the version
+to `package.json`, both `package-lock.json` entries, and `CHANGELOG.md`, then
+runs the tests and rebuilds `dist/` and `website/index.html` so every generated
+artifact carries the released version. It commits that as
+`chore(release): vX.Y.Z` and pushes before tagging.
+
+`.githooks/pre-push` refuses to push a version tag that disagrees with
+`package.json` at that commit — the backstop for a hand-typed `git tag`. Git has
+no pre-tag hook, so a bad tag is caught at push; remove it with `git tag -d`.
+
+Hooks activate through `core.hooksPath`, set by the `prepare` script on
+`npm install`. A fresh clone is unprotected until someone installs.
+
+The contract these files implement is documented in
+`~/Source/dotfiles/docs/git-release.md`.
+
+## Release Checklist
+
+1. Update behavior, tests, and docs in the same commit.
    `is:default` specific reminder: if shortcut semantics changed upstream, update `IS_DEFAULT_ATOMS` and the explicit `is:default` tests together.
    `is:commander` specific reminder: if semantic criteria change, update `semanticShortcuts.commander` in default field definitions and keep engine + `ctx.card` compile-shape tests in sync.
-3. Run `npm test`.
-4. Run `npm run build`.
-5. Verify one known token and one unknown token using `compile()` and inspecting `meta.terms`.
-6. Tag/release.
-
-## RC Closeout Checklist
-
-Use this before cutting a release candidate:
-
-1. Confirm package version is an RC tag (for example `0.2.0-rc.1`) in `package.json` and `package-lock.json`.
-2. Run `npm test` and `npm run build`.
+2. Add entries under `## [Unreleased]` in `CHANGELOG.md`.
 3. Ensure docs are synchronized with behavior:
    - `README.md`
    - `docs/SYNTAX-COVERAGE.md`
    - `docs/API.md`
    - `docs/PROFILES.md`
    - `docs/session-handoff.md`
-4. Ensure `docs/session-handoff.md` includes a dated checkpoint with the most recent validation commands.
-5. Verify the release notes section in `README.md` accurately describes shipped behavior and known limits.
-6. Commit `dist/` artifacts for RC parity review.
+4. Run `npm test` and `npm run build`.
+5. Verify one known token and one unknown token using `compile()` and inspecting `meta.terms`.
+6. `git autocommit` — the working tree must be clean before releasing; `git release` refuses a dirty tree rather than sweeping unrelated work into the release commit.
+7. `git release minor` (or `major` / `patch`, or an explicit `git release vX.Y.Z`
+   to land a final release after RCs — tag math counts up from the newest tag,
+   including prereleases).
+8. Confirm GitHub Pages redeployed with the new version. The Pages bundle is
+   rebuilt in CI at the pushed commit and is what downstream consumers pin:
+
+   ```bash
+   curl -sL https://jnovack.github.io/scryfall-query-dsl/dist/scryfall-query-dsl.js | grep -o 'RELEASE = true ? "[^"]*"'
+   ```
+
+The `dist/` committed in the repo embeds `version+<short sha>` where the sha is
+read at build time, so it names the release commit's *parent*. That is expected:
+the committed copy exists for parity review, while CI rebuilds the bundle Pages
+actually serves.

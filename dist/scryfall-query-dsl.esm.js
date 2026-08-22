@@ -1,4 +1,4 @@
-/* scryfall-query-dsl v0.2.0-rc.2+86fadb9 | built 2026-08-20T22:31:18.416Z */
+/* scryfall-query-dsl v0.2.0-rc.2+ad286f4 | built 2026-08-21T01:16:40.149Z */
 
 // src/compiler/helpers.js
 var ATOM_PATTERN = /^(-)?([^:><=]+)(>=|<=|:|=|>|<)(.+)$/;
@@ -1933,6 +1933,395 @@ function createParser() {
   };
 }
 
+// src/fields/descriptors.js
+function normalizeFieldDescriptor(name, source = {}, options = {}) {
+  const { defaultOperators = [] } = options;
+  const canonicalName = String(name);
+  const aliases = (Array.isArray(source.aliases) ? source.aliases : []).map(String).filter((alias) => alias !== canonicalName);
+  const operators = Array.isArray(source.operators) && source.operators.length ? source.operators.map(String) : [...defaultOperators];
+  return {
+    name: canonicalName,
+    names: [canonicalName, ...aliases],
+    aliases,
+    operators,
+    type: typeof source.type === "string" ? source.type : "",
+    description: typeof source.description === "string" ? source.description : "",
+    examples: (Array.isArray(source.examples) ? source.examples : []).map(String),
+    searchControl: Boolean(source.searchControl)
+  };
+}
+var SYNTHETIC_OPERATORS = [":", "="];
+
+// src/fields/groups.js
+function deepFreeze(value) {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
+    return value;
+  }
+  for (const entry of Object.values(value)) {
+    deepFreeze(entry);
+  }
+  return Object.freeze(value);
+}
+var KEYWORD_GROUPS = deepFreeze([
+  {
+    id: "colors",
+    label: "Colors and Color Identity",
+    fields: ["colors", "color_identity"],
+    unsupported: [
+      { label: "has:indicator", description: "Cards that have a color indicator on the card face" }
+    ]
+  },
+  {
+    id: "card-types",
+    label: "Card Types",
+    fields: ["type_line"],
+    unsupported: []
+  },
+  {
+    id: "card-text",
+    label: "Card Text",
+    fields: ["oracle_text", "keywords"],
+    unsupported: [
+      { label: "fo:", description: "Full oracle text search with reminder text excluded" },
+      { label: "o:/regex/", description: "Regular expression search on oracle text" },
+      { label: "~ substitution", description: "Use ~ in oracle text queries to stand for the card's own name" }
+    ]
+  },
+  {
+    id: "mana-costs",
+    label: "Mana Costs",
+    fields: ["mana_value"],
+    unsupported: [
+      { label: "m:", description: "Mana cost expression using mana symbols (e.g. m:{G}{U}, m>3WU)" },
+      { label: "produces:", description: "Mana produced by a land or ability (e.g. produces=wu)" },
+      { label: "devotion:", description: "Devotion to a color (e.g. devotion:{u/b}{u/b})" },
+      { label: "manavalue:odd / manavalue:even", description: "Cards with odd or even mana value" }
+    ]
+  },
+  {
+    id: "power-toughness-loyalty",
+    label: "Power, Toughness, and Loyalty",
+    fields: ["power", "toughness"],
+    unsupported: [
+      { label: "loyalty / loy:", description: "Planeswalker loyalty (e.g. loy=3, loy>=4)" },
+      { label: "pt: / powtou:", description: "Combined power+toughness comparison (e.g. pt=10)" },
+      { label: "pow>tou", description: "Cross-field power vs. toughness math comparisons" }
+    ]
+  },
+  {
+    id: "multi-faced",
+    label: "Multi-faced Cards",
+    fields: [],
+    unsupported: [
+      { label: "is:split", description: "Split cards (Fire // Ice)" },
+      { label: "is:flip", description: "Flip cards (Budoka Gardener)" },
+      { label: "is:transform", description: "Transform (DFC) cards" },
+      { label: "is:meld", description: "Meld cards" },
+      { label: "is:mdfc", description: "Modal double-faced cards" },
+      { label: "is:adventure", description: "Adventure cards" },
+      { label: "is:reversible", description: "Reversible cards" }
+    ]
+  },
+  {
+    id: "effects",
+    label: "Spells, Permanents, and Effects",
+    fields: ["is:spell", "not:spell"],
+    supported: [
+      {
+        name: "is:spell",
+        operators: [":", "="],
+        description: "Cards with major spell/permanent/battle type lines: creature, artifact, instant, sorcery, enchantment, planeswalker, or battle.",
+        examples: ["is:spell"]
+      },
+      {
+        name: "not:spell",
+        operators: [":", "="],
+        description: "Exclude cards matching the is:spell type-line disjunction.",
+        examples: ["not:spell"]
+      }
+    ],
+    unsupported: [
+      { label: "is:permanent", description: "Permanent card types (creature, artifact, enchantment, planeswalker, land)" },
+      { label: "is:historic", description: "Legendary, artifact, or Saga cards" },
+      { label: "is:vanilla", description: "Creatures with no abilities" },
+      { label: "is:modal", description: "Cards with modal effects (choose one, choose two, etc.)" }
+    ]
+  },
+  {
+    id: "extra-funny",
+    label: "Extra Cards and Funny Cards",
+    fields: [],
+    unsupported: [
+      { label: "is:funny", description: "Un-set and acorn-stamped cards" },
+      { label: "include:extras", description: "Include extra cards (tokens, emblems, art cards) in results" },
+      { label: "is:oversized", description: "Oversized card products" }
+    ]
+  },
+  {
+    id: "rarity",
+    label: "Rarity",
+    fields: ["rarity"],
+    unsupported: [
+      { label: "new:rarity", description: "Cards whose rarity changed from their previous printing" }
+    ]
+  },
+  {
+    id: "sets",
+    label: "Sets and Blocks",
+    fields: ["set", "set_type", "collector_number"],
+    unsupported: [
+      { label: "e: / edition:", description: "Alias for set: (not yet a built-in alias)" },
+      { label: "b: / block:", description: "Filter by block code or name (e.g. b:wwk)" }
+    ]
+  },
+  {
+    id: "cubes",
+    label: "Cubes",
+    fields: [],
+    unsupported: [
+      { label: "cube:", description: "Cards in a specific Scryfall cube (e.g. cube:vintage, cube:legacy)" }
+    ]
+  },
+  {
+    id: "legality",
+    label: "Format Legality",
+    fields: ["legal", "banned", "restricted"],
+    unsupported: []
+  },
+  {
+    id: "prices",
+    label: "USD/EUR/TIX Prices",
+    fields: ["usd", "eur", "tix"],
+    unsupported: [
+      { label: "cheapest:", description: "Cheapest printing in a given currency (e.g. cheapest:usd)" }
+    ]
+  },
+  {
+    id: "artist-flavor",
+    label: "Artist, Flavor Text and Watermark",
+    fields: ["flavor_text"],
+    unsupported: [
+      { label: "a: / artist:", description: 'Search by artist name (e.g. a:"proce")' },
+      { label: "wm: / watermark:", description: "Filter by watermark guild or symbol (e.g. wm:orzhov)" },
+      { label: "artists>1", description: "Cards illustrated by more than one artist" },
+      { label: "illustrations>1", description: "Cards with more than one illustration" },
+      { label: "new:art / new:artist / new:flavor", description: "Cards with new art, new artist, or new flavor text vs. previous printing" }
+    ]
+  },
+  {
+    id: "border-frame",
+    label: "Border, Frame, Foil and Resolution",
+    fields: ["border_color", "frame", "is:foil", "is:nonfoil"],
+    supported: [
+      {
+        name: "is:foil",
+        operators: [":", "="],
+        description: "Cards available in foil.",
+        examples: ["is:foil"]
+      },
+      {
+        name: "is:nonfoil",
+        operators: [":", "="],
+        description: "Cards available in non-foil.",
+        examples: ["is:nonfoil"]
+      }
+    ],
+    unsupported: [
+      { label: "is:hires", description: "Cards with high-resolution scan imagery" },
+      { label: "stamp:", description: "Filter by security stamp (acorn, arena, oval, triangle, etc.)" }
+    ]
+  },
+  {
+    id: "games-promos",
+    label: "Games, Promos and Spotlights",
+    // is:promo, is:spotlight and is:digital compile as semantic shortcuts under
+    // is:, but a reader looking for promos looks here, not under Shortcuts.
+    fields: ["game", "is:promo", "is:spotlight", "is:digital"],
+    supported: [
+      {
+        name: "is:promo",
+        operators: [":", "="],
+        description: "Promotional printing.",
+        examples: ["is:promo"]
+      },
+      {
+        name: "is:spotlight",
+        operators: [":", "="],
+        description: "Story spotlight card.",
+        examples: ["is:spotlight"]
+      },
+      {
+        name: "is:digital",
+        operators: [":", "="],
+        description: "Card exists only in digital form (MTGO or Arena). Equivalent to in:mtgo or in:arena.",
+        examples: ["is:digital"]
+      }
+    ],
+    unsupported: []
+  },
+  {
+    id: "year",
+    label: "Year",
+    fields: ["year", "date"],
+    unsupported: []
+  },
+  {
+    id: "tagger-tags",
+    label: "Tagger Tags",
+    fields: ["otag"],
+    unsupported: [
+      { label: "art:", description: "Tagger art tag (e.g. art:squirrel)" },
+      { label: "atag:", description: "Art tagger annotation tag" }
+    ]
+  },
+  {
+    id: "reprints",
+    label: "Reprints",
+    fields: [],
+    unsupported: [
+      { label: "is:reprint", description: "Cards that have been printed in a previous set" },
+      { label: "not:reprint", description: "Cards making their first printing appearance" },
+      { label: "sets>=N", description: "Cards printed in at least N sets (e.g. sets>=10)" },
+      { label: "papersets=N", description: "Cards in exactly N paper sets" }
+    ]
+  },
+  {
+    id: "languages",
+    label: "Languages",
+    fields: ["lang"],
+    unsupported: [
+      { label: "lang:any", description: "Cards printed in any non-English language" },
+      { label: "new:language", description: "Cards with a new-language printing vs. previous set" },
+      { label: "in:ru (language filter)", description: "Filter results to a specific language print only (lang: here is a sort preference, not an inclusion filter)" }
+    ]
+  },
+  {
+    id: "shortcuts",
+    label: "Shortcuts and Nicknames",
+    fields: ["is", "not", "is:commander", "is:default"],
+    supported: [
+      {
+        name: "is:commander",
+        operators: [":", "="],
+        description: "Cards that are legal commanders.",
+        examples: ["is:commander"]
+      },
+      {
+        name: "is:default",
+        operators: [":", "="],
+        description: "Standard printing: no special frame, promo, or alternate treatment.",
+        examples: ["is:default"]
+      }
+    ],
+    unsupported: [
+      { label: "is:dual", description: "Original dual lands (Tundra, Bayou, etc.)" },
+      { label: "is:fetchland", description: "Fetch lands" },
+      { label: "is:shockland", description: "Shock lands" },
+      { label: "is:checkland", description: "Check lands" },
+      { label: "is:companion", description: "Cards with the companion ability" },
+      { label: "is:reserved", description: "Cards on the reserved list" },
+      { label: "is:reprint", description: "Reprint shortcut (see Reprints section)" }
+    ]
+  },
+  {
+    id: "negation",
+    label: "Negating Conditions",
+    fields: [],
+    note: "Supported. Prefix any term or parenthesized group with - to negate it: -t:creature, -(c:red or c:white), -o:draw.",
+    unsupported: []
+  },
+  {
+    id: "regex",
+    label: "Regular Expressions",
+    fields: [],
+    unsupported: [
+      { label: "o:/regex/", description: "Regular expression search on oracle text" },
+      { label: "name:/regex/", description: "Regular expression name search" },
+      { label: "t:/regex/", description: "Regular expression type line search" }
+    ]
+  },
+  {
+    id: "exact-names",
+    label: "Exact Names",
+    fields: ["name"],
+    unsupported: [
+      { label: "!name: / !o:", description: "Fielded bang exact-match forms are not yet supported" }
+    ]
+  },
+  {
+    id: "or",
+    label: "Using OR",
+    fields: [],
+    note: "Supported. Use the or keyword (case-insensitive) between terms: c:red or c:white, (t:angel or t:demon) c:white.",
+    unsupported: []
+  },
+  {
+    id: "nesting",
+    label: "Nesting Conditions",
+    fields: [],
+    note: "Supported. Use parentheses to group sub-expressions: (c:red or c:white) t:angel.",
+    unsupported: []
+  },
+  {
+    id: "display",
+    label: "Display Keywords",
+    fields: ["unique", "order", "prefer", "direction"],
+    unsupported: []
+  }
+]);
+var OTHER_GROUP_ID = "other";
+function collectSyntheticFields(groups = KEYWORD_GROUPS) {
+  const synthetics = /* @__PURE__ */ new Map();
+  for (const group of groups) {
+    for (const entry of group.supported || []) {
+      if (!entry || typeof entry.name !== "string" || !entry.name.trim()) {
+        continue;
+      }
+      synthetics.set(entry.name.trim(), entry);
+    }
+  }
+  return synthetics;
+}
+function assembleGroups(fieldNames, groups = KEYWORD_GROUPS) {
+  const available = new Set(fieldNames);
+  const synthetics = collectSyntheticFields(groups);
+  const assigned = /* @__PURE__ */ new Set();
+  const assembled = groups.map((group) => {
+    const names = (group.fields || []).map((name) => {
+      if (available.has(name)) {
+        assigned.add(name);
+        return name;
+      }
+      if (synthetics.has(name)) {
+        return name;
+      }
+      throw new Error(
+        `Group "${group.id}" lists "${name}", which is neither a registered field nor a supported synthetic.`
+      );
+    });
+    return {
+      id: group.id,
+      label: group.label,
+      note: group.note || "",
+      fields: names,
+      supported: [...group.supported || []],
+      unsupported: [...group.unsupported || []]
+    };
+  });
+  const orphans = [...available].filter((name) => !assigned.has(name));
+  if (orphans.length) {
+    assembled.push({
+      id: OTHER_GROUP_ID,
+      label: "Other Fields",
+      note: "",
+      fields: orphans,
+      supported: [],
+      unsupported: []
+    });
+  }
+  return assembled;
+}
+
 // src/fields/is-not-token-index.js
 var IS_NOT_SOURCE_VALUES = {
   frame_effects: [
@@ -2871,6 +3260,34 @@ function createRegistry() {
     }
     return rawValue;
   }
+  function groupAliasesByField() {
+    const byField = /* @__PURE__ */ new Map();
+    for (const [alias, fieldName] of aliases) {
+      if (alias === fieldName) {
+        continue;
+      }
+      const existing = byField.get(fieldName);
+      if (existing) {
+        existing.push(alias);
+      } else {
+        byField.set(fieldName, [alias]);
+      }
+    }
+    return byField;
+  }
+  function listFields() {
+    const aliasesByField = groupAliasesByField();
+    return [...fields.entries()].map(
+      ([name, definition]) => normalizeFieldDescriptor(name, {
+        aliases: aliasesByField.get(name) ?? [],
+        operators: definition.operators,
+        type: definition.type,
+        description: definition.description,
+        examples: definition.examples,
+        searchControl: definition.searchControl
+      })
+    );
+  }
   function registerAlias(alias, fieldName, options = {}) {
     const { override = false } = options;
     const definition = getField(fieldName);
@@ -2892,6 +3309,7 @@ function createRegistry() {
   return {
     extend,
     getField,
+    listFields,
     parseValue,
     registerAlias,
     registerField,
@@ -2901,8 +3319,8 @@ function createRegistry() {
 
 // src/runtime/version.js
 var VERSION = true ? "0.2.0-rc.2" : "0.0.0-dev";
-var RELEASE = true ? "0.2.0-rc.2+86fadb9" : VERSION;
-var BUILD_DATE = true ? "2026-08-20T22:31:18.416Z" : "unbundled";
+var RELEASE = true ? "0.2.0-rc.2+ad286f4" : VERSION;
+var BUILD_DATE = true ? "2026-08-21T01:16:40.149Z" : "unbundled";
 var announced = false;
 function announceBrowserBuild() {
   if (announced || typeof window === "undefined" || typeof console?.info !== "function") {
@@ -2922,6 +3340,22 @@ function createCompilationContext({ extension, controlConfig } = {}) {
   return {
     registry,
     compiler
+  };
+}
+function describeGroup(group, descriptorsByName, synthetics) {
+  return {
+    id: group.id,
+    label: group.label,
+    note: group.note || "",
+    fields: group.fields.map(
+      (name) => descriptorsByName.get(name) ?? normalizeFieldDescriptor(name, synthetics.get(name), {
+        defaultOperators: SYNTHETIC_OPERATORS
+      })
+    ),
+    unsupported: group.unsupported.map((item) => ({
+      label: String(item.label ?? ""),
+      description: String(item.description ?? "")
+    }))
   };
 }
 function createEngine(options = {}) {
@@ -3120,6 +3554,49 @@ function createEngine(options = {}) {
       return this;
     },
     /**
+     * Describe the keyword reference for one profile: every field the profile
+     * actually compiles, grouped the same way the generated reference page groups them.
+     *
+     * Build in-app syntax help from this rather than copying the library's docs —
+     * a copy has no failing test when a field is added here, so it rots silently,
+     * while this reflects whatever bundle the consumer actually loaded.
+     *
+     * Fields registered at runtime that belong to no declared group appear in a
+     * trailing `other` group, so a custom field is never invisible. `supported`
+     * synthetics (`is:foil`, `is:spell`, …) appear as ordinary descriptors; they
+     * compile as token values rather than fields, but a reader looking for them
+     * should not have to know that.
+     *
+     * The result is a fully detached snapshot: nothing in it aliases the registry
+     * or `KEYWORD_GROUPS`, so it is safe to `structuredClone()`, store in
+     * framework state, sort, or edit in place.
+     *
+     * @param {object} [options]
+     * @param {string} [options.profile="default"] - Profile to describe. Built-in: `"default"`, `"ctx.card"`.
+     * @returns {{version: string, profile: string, groups: object[]}} The grouped reference.
+     * @throws {Error} If the profile is unknown, or a group lists a name that is
+     *   neither a registered field nor a supported synthetic.
+     *
+     * @example
+     * const { groups } = engine.describeFields();
+     * groups[0].fields[0]; // { name: 'colors', names: ['colors', 'c', 'color'], ... }
+     */
+    describeFields(options2 = {}) {
+      const { profile = "default" } = options2;
+      const context = getProfileContext(profile);
+      const descriptors = context.registry.listFields();
+      const descriptorsByName = new Map(
+        descriptors.map((descriptor) => [descriptor.name, descriptor])
+      );
+      const synthetics = collectSyntheticFields();
+      const groups = assembleGroups(descriptorsByName.keys());
+      return {
+        version: RELEASE,
+        profile,
+        groups: groups.map((group) => describeGroup(group, descriptorsByName, synthetics))
+      };
+    },
+    /**
      * Resolve a field name or alias to its canonical field name.
      *
      * @param {string} nameOrAlias - A field name or registered alias.
@@ -3144,6 +3621,7 @@ function createEngine(options = {}) {
 announceBrowserBuild();
 export {
   BUILD_DATE,
+  KEYWORD_GROUPS,
   RELEASE,
   VERSION,
   announceBrowserBuild,
